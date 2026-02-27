@@ -1,0 +1,297 @@
+# -*- coding: utf-8 -*-
+import sys, re, requests, time, xbmcgui, xbmc, json, base64, sqlite3, os
+from datetime import datetime
+from vavoo.utils import *
+
+tagger = False
+#unicode = str
+db = os.path.join(datapath, 'epg.db')
+con = False
+if os.path.exists(db):
+    con = sqlite3.connect(db)
+    con.row_factory = lambda c, r: dict([(col[0], r[idx]) for idx, col in enumerate(c.description)])
+    con.text_factory = lambda x: str(x, errors='ignore')
+
+chanicons = ['13thstreet.png', '3sat.png', 'animalplanet.png', 'anixe.png', 'ard.png', 'ardalpha.png', 'arte.png', 'atv.png', 'atv2.png', 'automotorsport.png', 'axnblack.png', 'axnwhite.png', 'br.png', 'cartoonito.png', 'cartoonnetwork.png', 'comedycentral.png', 'curiositychannel.png', 'fix&foxi.png', 'dazn1.png', 'dazn2.png', 'deluxemusic.png', 'nationalgeographic.png', 'dmax.png', 'eurosport1.png', 'eurosport2.png', 'nickjunior.png', 'superrtl.png', 'heimatkanal.png', 'history.png', 'hr.png', 'jukebox.png', 'kabel1doku.png', 'pro7.png', 'pro7maxx.png', 'pro7fun.png', 'rtl2.png', 'kika.png', 'kinowelt.png', 'mdr.png', 'universaltv.png', 'discovery.png', 'mtv.png', 'n24doku.png', 'natgeowild.png', 'sky1.png', 'ndr.png', 'nickelodeon.png', 'nitro.png', 'romancetv.png', 'ntv.png', 'one.png', 'orf1.png', 'orf2.png', 'orf3.png', 'orfsportplus.png', 'phoenix.png', 'geotv.png', 'puls24.png', 'puls4.png', 'rbb.png', 'ric.png', 'motorvision.png', 'rtl.png', 'rtlcrime.png', 'rtlliving.png', 'kabel1.png', 'rtlpassion.png', 'rtlup.png', 'sat1.png', 'sat1emotions.png', 'sat1gold.png', 'servustv.png', 'silverline.png', 'sixx.png', 'skyatlantic.png', 'skycinemaaction.png', 'skycinemaclassics.png', 'skycinemafamily.png', 'skycinemahighlights.png', 'skycinemapremieren.png', 'skycrime.png', 'skydocumentaries.png', 'skykrimi.png', 'skynature.png', 'skyreplay.png', 'skyshowcase.png', 'spiegelgeschichte.png', 'kabel1classics.png', 'sport1.png', 'sportdigital.png', 'swr.png', 'syfy.png', 'tagesschau24.png', 'tele5.png', 'tlc.png', 'toggoplus.png', 'crime+investigation.png', 'vox.png', 'voxup.png', 'warnertvcomedy.png', 'warnertvfilm.png', 'warnertvserie.png', 'wdr.png', 'welt.png', 'weltderwunder.png', 'zdf.png', 'zdfinfo.png', 'zdfneo.png', 'zeeone.png', 'skycinemathriller.png']
+
+def resolve_link(link):
+    try:
+        if not "vavoo" in link:
+            from vavoo.stalker import StalkerPortal
+            link, headers = StalkerPortal(get_cache_or_setting("stalkerurl"), get_cache_or_setting("mac")).get_tv_stream_url(link)
+            # Wenn 403 erkannt und None zurückkommt: sofort abbrechen
+            if not link: return None, None
+            status = int(requests.get(link, headers=headers, timeout=10, stream=True).status_code)
+            log(f"function resolve_link Staus :{status}")
+            if status < 400: return link, "&".join([f"{k}={v}" for k, v in headers.items()])
+        elif getSetting("streammode") == "1":
+            _headers = {"user-agent": "MediaHubMX/2", "accept": "application/json", "content-type": "application/json; charset=utf-8", "content-length": "115", "accept-encoding": "gzip", "mediahubmx-signature": getAuthSignature()}
+            _data = {"language": "de", "region": "AT", "url": link, "clientVersion": "3.0.2"}
+            url = "https://vavoo.to/mediahubmx-resolve.json"
+            streamurl = requests.post(url, json=_data, headers=_headers).json()[0]["url"]
+            status = int(requests.get(streamurl, timeout=10, stream=True).status_code)
+            log(f"function resolve_link Staus :{status}")
+            if status < 400: return streamurl, None
+        else:
+            streamurl = "%s.ts?n=1&b=5&vavoo_auth=%s" % (link.replace("vavoo-iptv", "live2")[0:-12], gettsSignature())
+            status = int(requests.get(streamurl, headers={"User-Agent": "VAVOO/2.6"}, timeout=10, stream=True).status_code)
+            log(f"function resolve_link Staus :{status}")
+            if status < 400: return streamurl, "User-Agent=VAVOO/2.6"
+    except: log(format_exc())
+    return None, None
+
+def get_stalker_channels(genres=False):
+    if genres == False: cacheOk, genres = get_cache("stalker_groups")
+    from vavoo.stalker import StalkerPortal, get_genres, new_mac
+    if not genres: genres = get_genres()
+    cacheOk, chan = get_cache("sta_channels")
+    if not cacheOk:
+        url, mac = get_cache_or_setting("stalkerurl"), get_cache_or_setting("mac")
+        if not url or not mac:
+            dialog.notification('VAVOO.TO', 'Kein Stalkerportal gewählt, deaktiviere Stalker', xbmcgui.NOTIFICATION_ERROR, 2000)
+            setSetting("stalker", "false")
+            return {}
+        portal = StalkerPortal(url, mac)
+        check = portal.check()
+        if check == True: cacheOk, chan = get_cache("sta_channels")
+        elif check == "IP BLOCKED":
+            dialog.notification('VAVOO.TO', 'IP BLOCKED anderes Portal auswählen, deaktiviere Stalker', xbmcgui.NOTIFICATION_ERROR, 2000)
+            setSetting("stalker", "false")
+            return {}
+        else:
+            m = new_mac(True)
+            if m == False:
+                dialog.notification('VAVOO.TO', 'Keine funktionierende Mac gefunden, anderes Portal auswählen, deaktiviere Stalker', xbmcgui.NOTIFICATION_ERROR, 2000)
+                setSetting("stalker", "false")
+                return {}
+        cacheOk, chan = get_cache("sta_channels")
+        if not cacheOk: return {}
+    sta_channels = {}
+    for item in chan:
+        if item["tv_genre_id"] not in genres: continue
+        name = item["name"].upper()
+        # if not name.isascii(): continue
+        if any(ele in name for ele in ["***", "###", "---"]): continue
+        name = filterout(name)
+        if not name: continue
+        if name not in sta_channels: sta_channels[name] = []
+        if item["cmd"] not in sta_channels[name]:
+            sta_channels[name].append(item["cmd"])
+    return sta_channels
+
+def get_epg_data():
+    if int(addon.getSetting("epg_provider")) == 0:
+        epg_data = {'1-2-3.TV': ['4724', 'http://ngiss.t-online.de/cm1s/media/ca0c611992e1d587d76fab310e74ca4e32ff69ab.png'], '13TH STREET': ['471', 'http://ngiss.t-online.de/cm1s/media/668cd4d06f6981b82841f40fad42bc350babb056.png'], '3SAT': ['392', 'http://ngiss.t-online.de/cm1s/media/f0fc63107fddc5c72d70a64f90f9672710e3a3d9.png'], 'ALLGÃ„U TV': ['448', 'http://ngiss.t-online.de/cm1s/media/d37488ac6d2572b3cda8b5abc35f2ef632f46d8d.png'], 'ANIMAL PLANET': ['105', 'http://ngiss.t-online.de/cm1s/media/cd0ca6f68c634ba2fd4ce665043f3cefdd1c1c9d.png'], 'ANIXE HD': ['452', 'http://ngiss.t-online.de/cm1s/media/7d936048c94ca83281a61951170b5ad0da756584.png'], 'ANIXE SERIE HD': ['4777', 'http://ngiss.t-online.de/cm1s/media/f105ac8c8e8dbede59277c3b2019c65ea1ecfc95.png'], 'ARD-ALPHA': ['479', 'http://ngiss.t-online.de/cm1s/media/4f1286373cd3362649d2e4ae1692ab8a360bf773.png'], 'ARTE': ['394', 'http://ngiss.t-online.de/cm1s/media/a94bb4917f279b02cb739e788c18f38a009f95a0.png'], 'ATV': ['161', 'http://ngiss.t-online.de/cm1s/media/ecd02c711e2a96d79702ef779035c9b03ecb5811.png'], 'AUTO MOTOR UND SPORT': ['108', 'http://ngiss.t-online.de/cm1s/media/8ffbb0a95849b6c7af04aeaea5c2e1680c6cb0ad.png'], 'AXN': ['110', 'http://ngiss.t-online.de/cm1s/media/df6a8f84c2ecbe26b090e37b782db46b9d98b1bb.png'], 'BABY TV': ['109', 'http://ngiss.t-online.de/cm1s/media/5ba6b3a95fbbbce05e3b62e45196771dbf2fe33e.png'], 'BBC ENTERTAINMENT': ['454', 'http://ngiss.t-online.de/cm1s/media/f41b3e216d38d542dd49f4e3d0f1d21d87dd43cb.png'], 'BEATE-UHSE.TV': ['107', 'http://ngiss.t-online.de/cm1s/media/40e5d10666540db54a54bb2092a47faa39a52ec8.png'], 'BERGBLICK': ['45', 'http://ngiss.t-online.de/cm1s/media/2f68a8b738d31415c99da911bea93a97020ee1f3.png'], 'BIBEL TV': ['485', 'http://ngiss.t-online.de/cm1s/media/4754ecc68c5e078e80ac2d5435726b2a9b016b90.png'], 'BON GUSTO': ['117', 'http://ngiss.t-online.de/cm1s/media/65ebe25329d441714dc70fa737e90c68c2a6e129.png'], 'BR': ['407', 'http://ngiss.t-online.de/cm1s/media/40d2ab4ade690ec7e4d965e586a62ca937ee091c.png'], 'CARTOON NETWORK': ['4512', 'http://ngiss.t-online.de/cm1s/media/f73ed871486bd026ffc3ff4cf5e5ac2eeaf6f746.png'], 'CHANNEL21': ['5176', 'http://ngiss.t-online.de/cm1s/media/eb86d7033816033536232cfa5a1c03c396b64d28.png'], 'COMEDY CENTRAL': ['50', 'http://ngiss.t-online.de/cm1s/media/766e5d3738b790d93690b9a6a40e65b99cb73d6b.png'], 'CRIME INVESTIGATION': ['106', 'http://ngiss.t-online.de/cm1s/media/98c3430141aaf756c564aedafebb36d0258f34c1.png'], 'SPIEGEL TV WISSEN': ['186', 'http://ngiss.t-online.de/cm1s/media/7502f4f2236a2916323f079e168237ffd7150a25.png'], 'DAS ERSTE': ['373', 'http://ngiss.t-online.de/cm1s/media/3711d16d0e3570276ebba175620385b5f4ff18f4.png'], 'DAZN 1': ['5507', 'http://ngiss.t-online.de/cm1s/media/7c93cbccfa99c23171441af6ba8f35cd22d9cf28.png'], 'DAZN 2': ['5508', 'http://ngiss.t-online.de/cm1s/media/141a3d65b2f92f7e2a52c93d30a0a29f2184466d.png'], 'DELUXE MUSIC': ['25', 'http://ngiss.t-online.de/cm1s/media/d31840e010d6da58d1aeb2009b04f5a9924481c1.png'], 'DEUTSCHES MUSIK FERNSEHEN': ['5312', 'http://ngiss.t-online.de/cm1s/media/febc89b3d6ee8a59fce7915cc9ccc7b4448cfd3e.png'], 'DISCOVERY CHANNEL': ['468', 'http://ngiss.t-online.de/cm1s/media/6e522d9ae4b2a9a8f686281f7d3adff2d8862ee3.png'], 'DISNEY CHANNEL': ['27', 'http://ngiss.t-online.de/cm1s/media/8ddb880c89e880c0a150c17e355138b0341ed6ee.png'], 'DMAX': ['429', 'http://ngiss.t-online.de/cm1s/media/f47210c8539cdcb85e4c468f83a281f6daa66b58.png'], 'ESPORTS1': ['191', 'http://ngiss.t-online.de/cm1s/media/6e4cee1ab1da1d86af73c1bfb533f11fe7711c5b.png'], 'EUROSPORT 1': ['389', 'http://ngiss.t-online.de/cm1s/media/18f200745e93b6c9848237acaaa008ea9f520f94.png'], 'EUROSPORT 2': ['18', 'http://ngiss.t-online.de/cm1s/media/fbc41d77249de69bb35febcff1bb74dd87a3b031.png'], 'GEO TELEVISION': ['153', 'http://ngiss.t-online.de/cm1s/media/267643eb7bc861bb7e308a303f66e5301e848db7.png'], 'HH1': ['244', 'http://ngiss.t-online.de/cm1s/media/254cb8179b6bf0b87bf6e8907d184203dbca13b3.png'], 'HEIMATKANAL': ['661', 'http://ngiss.t-online.de/cm1s/media/daabe8d88933d58ca50ef01e692058fe39759627.png'], 'HGTV': ['3583', 'http://ngiss.t-online.de/cm1s/media/f1d655994f8af8a636f983c9d3fe1a862501766d.png'], 'HISTORY CHANNEL': ['162', 'http://ngiss.t-online.de/cm1s/media/c991f75a9b93fb49233fe78cbcc37007d99e01ad.png'], 'HR-FERNSEHEN': ['386', 'http://ngiss.t-online.de/cm1s/media/b11ecb6905afbf9f82d9cd8624c242013a78824e.png'], 'HSE24': ['451', 'http://ngiss.t-online.de/cm1s/media/af654601ccb9e529f85c736e2c66e9fb96d62acc.png'], 'JUKEBOX': ['132', 'http://ngiss.t-online.de/cm1s/media/9735a7ac5cfcf3c56acd644069751c8c5b72bbe8.png'], 'KABEL 1': ['405', 'http://ngiss.t-online.de/cm1s/media/e92cc62717350cd0378f1191c21a3512362c65a1.png'], 'KABEL EINS CLASSICS': ['157', 'http://ngiss.t-online.de/cm1s/media/3d6c4e11c8058b35f0726c1e25ab1b391a2ada75.png'], 'KABEL EINS DOKU': ['573', 'http://ngiss.t-online.de/cm1s/media/ca3279d86270655d49eb50a361e1dcb4564bf39e.png'], 'KIKA': ['387', 'http://ngiss.t-online.de/cm1s/media/7d9a501ddc07382fcfdbb0c0797916ba4e78cacd.png'], 'KINOWELT': ['137', 'http://ngiss.t-online.de/cm1s/media/8f80fdd4f8fe6853800aeec106062fc2ee1d5ab4.png'], 'K-TV': ['487', 'http://ngiss.t-online.de/cm1s/media/e942c7a5d723ecea30ee55121067d86cf541f262.png'], 'LUST PUR': ['32', 'http://ngiss.t-online.de/cm1s/media/35264aa89ecba0a3ceb4b0f6f4e0eae0eefb9fcf.png'], 'MARCO POLO TV': ['5295', 'http://ngiss.t-online.de/cm1s/media/f8877cba3e440dc9d7d62e1bd51250b06fe2b03a.png'], 'MDR SACHSEN': ['370', 'http://ngiss.t-online.de/cm1s/media/8e11c0abde6c90a68507070c73b443401a24fcff.png'], 'MOTORVISION': ['604', 'http://ngiss.t-online.de/cm1s/media/744220404bda665ff97622e9adc9969540e05895.png'], 'MTV GERMANY': ['28', 'http://ngiss.t-online.de/cm1s/media/95d8d4289c6a6056f67cac44eded24ad7b8cce8a.png'], 'MÃœNCHEN TV': ['241', 'http://ngiss.t-online.de/cm1s/media/0c7f41025f6eb921088338aaca24116787652f0c.png'], 'N24 DOKU': ['553', 'http://ngiss.t-online.de/cm1s/media/bf4ce870d460dcdb3b1e573d58a14137a7d002ea.png'], 'NATIONAL GEOGRAPHIC': ['35', 'http://ngiss.t-online.de/cm1s/media/c9d4a2fb172069fc67d4170738cdbbc225f079f6.png'], 'NAT GEO WILD': ['569', 'http://ngiss.t-online.de/cm1s/media/deec95134d0baec0f4030cb9c96a1f7348419c30.png'], 'NDR': ['377', 'http://ngiss.t-online.de/cm1s/media/d72e120a384a97f269eb891ad135fb4d115decbb.png'], 'NICK JUNIOR': ['221', 'http://ngiss.t-online.de/cm1s/media/cfa3bf59d761bb21a108955f7dd919d04ef20734.png'], 'NICKTOONS': ['4405', 'http://ngiss.t-online.de/cm1s/media/9361033a288cb7f1f525416eef433f1d47c38abf.png'], 'N-TV': ['376', 'http://ngiss.t-online.de/cm1s/media/1c3073dd69376d57149afdb1791c2576724000f2.png'], 'ONE': ['402', 'http://ngiss.t-online.de/cm1s/media/70b3ed315768d8799f8577aad1003e4b2758b197.png'], 'PHOENIX': ['371', 'http://ngiss.t-online.de/cm1s/media/0630170ba6401342025bf2ca1b1ed337e653bed5.png'], 'PROSIEBEN': ['374', 'http://ngiss.t-online.de/cm1s/media/a7f56de9d6b8af8708bda4a48349ab6a3f713ecd.png'], 'PRO7 FUN': ['259', 'http://ngiss.t-online.de/cm1s/media/1f0e9026087e023f7464640bcbe4eaed6cce4055.png'], 'PROSIEBEN MAXX': ['396', 'http://ngiss.t-online.de/cm1s/media/8bbd8b6505244eadf79acc39552459c44c052ffa.png'], 'QVC': ['446', 'http://ngiss.t-online.de/cm1s/media/d985b7be308774435b4e824e87857be6d01626a0.png'], 'RADIO BREMEN TV': ['368', 'http://ngiss.t-online.de/cm1s/media/cd648267d785ddb46756676b9d0b5ee806a60a7d.png'], 'RBB BERLIN': ['384', 'http://ngiss.t-online.de/cm1s/media/3c5a2a45fa454d43b49eb1a696cafd0a4eeb1c86.png'], 'RNF': ['246', 'http://ngiss.t-online.de/cm1s/media/c1dd9de99f0eabc4c3f8efa1a6a7c15631783360.png'], 'RIC': ['5329', 'http://ngiss.t-online.de/cm1s/media/d3793d2e6881bb5ba207356a5ac262a4c96264eb.png'], 'ROMANCE TV': ['658', 'http://ngiss.t-online.de/cm1s/media/26147f4735983c4f20ad71c01ba95f25b1a7ccc7.png'], 'RTL': ['404', 'http://ngiss.t-online.de/cm1s/media/3f21af88cf184a45ff4c54be37053ddd678e2456.png'], 'RTL II': ['382', 'http://ngiss.t-online.de/cm1s/media/c2f437c77a06daffbcaa14f5caed1b301abda6b7.png'], 'RTL CRIME': ['216', 'http://ngiss.t-online.de/cm1s/media/fda6a6827c4ba695a264061adc0a8813eb83afa7.png'], 'RTL LIVING': ['227', 'http://ngiss.t-online.de/cm1s/media/df96334494725e0766bf3a22ac6ae3ea88611adf.png'], 'RTL NITRO': ['395', 'http://ngiss.t-online.de/cm1s/media/3e55a412683a498ae7e19077ea81b564bb1b271b.png'], 'RTL PASSION': ['209', 'http://ngiss.t-online.de/cm1s/media/f723199cfa53cb06b833be3a91bc36f301fbafc8.png'], 'RTLUP': ['542', 'http://ngiss.t-online.de/cm1s/media/f0eab07df247d9f64761c2d9f6e12d244d5ed0b5.png'], 'SAT 1': ['381', 'http://ngiss.t-online.de/cm1s/media/efd5a2c8992cd87d3fcc83b5b2399d12971bf89f.png'], 'SAT.1 EMOTIONS': ['224', 'http://ngiss.t-online.de/cm1s/media/fb8cf407e719419c47b394d4307cb3e7aa16c4ae.png'], 'SAT1 GOLD HD': ['338', 'http://ngiss.t-online.de/cm1s/media/c4df738dfcdc4307911328c1368b717428f234d8.png'], 'SYFY': ['465', 'http://ngiss.t-online.de/cm1s/media/ea9846917902c635cd3c5b239bd2f0c5d23c0c98.png'], 'SERVUS TV HD': ['39', 'http://ngiss.t-online.de/cm1s/media/7705473aad92b6a66fbd0d0f845ba5a884d69989.png'], 'SIXX': ['380', 'http://ngiss.t-online.de/cm1s/media/2dc9daa2cdf850169e75d472bd42362f60a0cd7f.png'], 'SKY 1': ['576', 'http://ngiss.t-online.de/cm1s/media/1a2ed987272b88d35770eae839376b8807836a84.png'], 'SKY ACTION': ['40', 'http://ngiss.t-online.de/cm1s/media/62de0add95c271dede017fb50d22f6de51ffa34d.png'], 'SKY ATLANTIC': ['264', 'http://ngiss.t-online.de/cm1s/media/e9fd1abc76e3b402cf5ae4f65bf6798741cd214e.png'], 'SKY SPORT BUNDESLIGA 1': ['206', 'http://ngiss.t-online.de/cm1s/media/4200a7071dfb0095510d7ed65682da53ba833eec.png'], 'SKY SPORT BUNDESLIGA 10': ['5557', 'http://ngiss.t-online.de/cm1s/media/083d140c6df8ca522b605c2c9ca9fb24a92455f3.png'], 'SKY SPORT BUNDESLIGA 2': ['211', 'http://ngiss.t-online.de/cm1s/media/157acf7ce820d15b32b3b032403a32fb65958ac2.png'], 'SKY SPORT BUNDESLIGA 3': ['199', 'http://ngiss.t-online.de/cm1s/media/059d08de74e6183963d844496ffa1d96b7e264ef.png'], 'SKY SPORT BUNDESLIGA 4': ['232', 'http://ngiss.t-online.de/cm1s/media/1896c9e512a830512a50aead481612e623c7fc40.png'], 'SKY SPORT BUNDESLIGA 5': ['234', 'http://ngiss.t-online.de/cm1s/media/e1b0693d92286bae1481f232ff087a4f0cd3b7e1.png'], 'SKY SPORT BUNDESLIGA 6': ['231', 'http://ngiss.t-online.de/cm1s/media/18b38a657b0333c91513befb793a06e06d5e6f58.png'], 'SKY SPORT BUNDESLIGA 7': ['258', 'http://ngiss.t-online.de/cm1s/media/25af99e420b22dc62986815785d2eac63c9d132b.png'], 'SKY SPORT BUNDESLIGA 8': ['219', 'http://ngiss.t-online.de/cm1s/media/b23310b91343dae0296d313b692b52dbbdec8d69.png'], 'SKY SPORT BUNDESLIGA 9': ['237', 'http://ngiss.t-online.de/cm1s/media/282435adc67782bce8ea32e0b92173f6d76baf4f.png'], 'SKY CINEMA CLASSICS': ['200', 'http://ngiss.t-online.de/cm1s/media/14c205585d3d1c5728d0575c661dc0d12c340ef1.png'], 'SKY CINEMA FAMILY': ['572', 'http://ngiss.t-online.de/cm1s/media/4af8c51b0aae80d28cb887cd75fe15508aea515f.png'], 'SKY CINEMA FUN': ['235', 'http://ngiss.t-online.de/cm1s/media/b49bd59ff13cb015a5ab9243bf102d6b3d1cc4be.png'], 'SKY CINEMA +1': ['195', 'http://ngiss.t-online.de/cm1s/media/0b253961f1ed86531231b7ebef4856fe2393998c.png'], 'SKY CINEMA+24': ['202', 'http://ngiss.t-online.de/cm1s/media/5371a1404566488319991aef236525c5cdd96fd0.png'], 'SKY CINEMA BEST OF 2019 HD': ['3844', 'http://ngiss.t-online.de/cm1s/media/2c4c6b314f2e5280c36b01434468d73c7d8c6ab7.png'], 'SKY CINEMA THRILLER': ['4356', 'http://ngiss.t-online.de/cm1s/media/e72acc4e943682e5c0fc1bc320a6fbe2b9675fd0.png'], 'SKY CRIME': ['4924', 'http://ngiss.t-online.de/cm1s/media/55f7af6e6da0e5fe88c98d17969ec3567cde00c6.png'], 'SKY DOCUMENTARIES': ['5143', 'http://ngiss.t-online.de/cm1s/media/d678db56c8ea3648fe89d02a8b017a8b9a7d9f06.png'], 'SKY KRIMI': ['201', 'http://ngiss.t-online.de/cm1s/media/2092514be53beb3a7d0b25a95db91ed27c707c8b.png'], 'SKY NATURE': ['5142', 'http://ngiss.t-online.de/cm1s/media/6ed382f8ee9fb14dd678d78dbe4d4d8c2f9ff0c5.png'], 'SKY REPLAY': ['3756', 'http://ngiss.t-online.de/cm1s/media/5727b8cc057a36b525abafb23b46d02bb24fed70.png'], 'SKY SHOWCASE': ['5577', 'http://ngiss.t-online.de/cm1s/media/09629b5939190f0df366f958f199d6d499b2c4bd.png'], 'SKY SPORT 1': ['192', 'http://ngiss.t-online.de/cm1s/media/de52c5d48628b03453d6c09ff0d625ccd9123329.png'], 'SKY SPORT 10': ['5554', 'http://ngiss.t-online.de/cm1s/media/402fc1d16a4b7072aa3ec0a6382178a6a874afd6.png'], 'SKY SPORT 2': ['212', 'http://ngiss.t-online.de/cm1s/media/a81a83173f2b76a9167bb872d535645d12ff16c5.png'], 'SKY SPORT 3': ['189', 'http://ngiss.t-online.de/cm1s/media/1206e226d77c64a66c18676d2a4995ac0d4f528e.png'], 'SKY SPORT 4': ['111', 'http://ngiss.t-online.de/cm1s/media/33e321e0ea47007d4fe5840b462f324425c04b77.png'], 'SKY SPORT 5': ['114', 'http://ngiss.t-online.de/cm1s/media/174bc4e879e6dfe8da2da79a20d1cd12a2e64a11.png'], 'SKY SPORT 6': ['113', 'http://ngiss.t-online.de/cm1s/media/dccedc966ee1e760137bbf38f34d86f0793ab7ed.png'], 'SKY SPORT 7': ['127', 'http://ngiss.t-online.de/cm1s/media/2f260de91a03cc79f32ad816be1aae5e424fc523.png'], 'SKY SPORT 8': ['261', 'http://ngiss.t-online.de/cm1s/media/b355966e88194e9b72e2879cece8735834a1b45a.png'], 'SKY SPORT 9': ['187', 'http://ngiss.t-online.de/cm1s/media/68a5a9c16947d1423678be66c7223fc5f4e5d037.png'], 'SKY SPORT BUNDESLIGA': ['42', 'http://ngiss.t-online.de/cm1s/media/cf8a1da7411cef9e690ad178cedbd9dbe13ebdbd.png'], 'SKY SPORT F1': ['4889', 'http://ngiss.t-online.de/cm1s/media/67d611a4e282db524f86d9424d2ce0921bdca5a3.png'], 'SKY SPORT GOLF': ['5558', 'http://ngiss.t-online.de/cm1s/media/20375ea6aa459f3e75ff52ef8dd025257f91c453.png'], 'SKY SPORT MIX HD': ['5556', 'http://ngiss.t-online.de/cm1s/media/5494143bb12d192a5c0b69b5f93c2d3368e00fbd.png'], 'SKY SPORT NEWS': ['190', 'http://ngiss.t-online.de/cm1s/media/73b37ddf8cadce6a5c4a1ebdf70a526c2ae93719.png'], 'SKY SPORT PREMIER LEAGUE': ['5555', 'http://ngiss.t-online.de/cm1s/media/398c412f21c4d52385bffd49f852338d56b43808.png'], 'SKY SPORT TENNIS': ['198', 'http://ngiss.t-online.de/cm1s/media/e69c367167782ff684da93d889c980eec8ea0bfd.png'], 'SKY SPORT TOP EVENT': ['31', 'http://ngiss.t-online.de/cm1s/media/8693b13e8355d376c9b2c53e515e7f85abe659d9.png'], 'SONNENKLAR': ['486', 'http://ngiss.t-online.de/cm1s/media/14573aebde590f886d975d5193a26dc6065c0683.png'], 'SPIEGEL GESCHICHTE HD': ['4406', 'http://ngiss.t-online.de/cm1s/media/cb6141ae4226647544a9af4b6d69e41d557fe894.png'], 'SPORT1+': ['44', 'http://ngiss.t-online.de/cm1s/media/074034f464715db15c5859b60b36558cac35a5e3.png'], 'SPORTDIGITAL': ['194', 'http://ngiss.t-online.de/cm1s/media/36207a17b0a5760b3977dcf130e53ce30f09c594.png'], 'SR FERNSEHEN': ['379', 'http://ngiss.t-online.de/cm1s/media/784cfb3e89c660ecf9f02bae301f40f875996af9.png'], 'SUPER RTL': ['403', 'http://ngiss.t-online.de/cm1s/media/d83d20be89d5f6899d8885b944b109928f7a3171.png'], 'SWR FERNSEHEN RP': ['393', 'http://ngiss.t-online.de/cm1s/media/033802069c0c3086585d215e0592501669f15f1c.png'], 'SÃœDWEST FERNSEHEN': ['398', 'http://ngiss.t-online.de/cm1s/media/033802069c0c3086585d215e0592501669f15f1c.png'], 'TAGESSCHAU24': ['400', 'http://ngiss.t-online.de/cm1s/media/2d0ef79c908ad450db7ddc28eaf7076a02e162af.png'], 'TELE 5': ['48', 'http://ngiss.t-online.de/cm1s/media/05452ad179e25678e50434da167e2f3ede2a9f60.png'], 'TLC': ['383', 'http://ngiss.t-online.de/cm1s/media/bd43973022bc8b5e4e44ecaf07cbeaaca3943fd6.png'], 'TOGGOPLUS': ['601', 'http://ngiss.t-online.de/cm1s/media/35d704a6beeecc53be277ba5e9342ddca6df5e0a.png'], 'UNIVERSAL CHANNEL': ['185', 'http://ngiss.t-online.de/cm1s/media/1994bd733a17fbcd32d1d78dc43b28c362776f5b.png'], 'VOX': ['385', 'http://ngiss.t-online.de/cm1s/media/0e5b4d41d518a068a0bef830d64f848b84ac39d1.png'], 'VOXUP': ['3930', 'http://ngiss.t-online.de/cm1s/media/7475b5f5fce6df60756901f94904c42d2675c6d9.png'], 'WARNER COMEDY': ['181', 'http://ngiss.t-online.de/cm1s/media/793f9b574904a15207169109b57f7b52979e9d14.png'], 'WARNER FILM': ['184', 'http://ngiss.t-online.de/cm1s/media/a4a10078c8d5e31bb59574f9fb4df3ae7d6f975b.png'], 'WARNER SERIE': ['53', 'http://ngiss.t-online.de/cm1s/media/ac63870aec09e2977583b416e2547620552e6c4d.png'], 'WDR KÃ–LN': ['397', 'http://ngiss.t-online.de/cm1s/media/8784546120200060bc84357fcafd0994d648ee40.png'], 'WEDO MOVIES': ['5399', 'http://ngiss.t-online.de/cm1s/media/f45a2a145e9188a561e5cbf4e6e77a48e2388fd3.png'], 'WELT': ['375', 'http://ngiss.t-online.de/cm1s/media/949412402d4f2ba8cf1b63ebed3223b6c652765d.png'], 'WELT DER WUNDER': ['60', 'http://ngiss.t-online.de/cm1s/media/629f72770f72b4f816843f063e0281d9b3d355d9.png'], 'WETTER.COM TV': ['571', 'http://ngiss.t-online.de/cm1s/media/18ebe2c3ee90c1060da7a5498d2f7e846321271b.png'], 'ZDF': ['408', 'http://ngiss.t-online.de/cm1s/media/35d71e6d09f3551cb4053da8487b3028cf9339cd.png'], 'ZDFINFOKANAL': ['378', 'http://ngiss.t-online.de/cm1s/media/60641d1e04421f17dd4369382a389b0d7599b736.png'], 'ZDF NEO': ['391', 'http://ngiss.t-online.de/cm1s/media/9f4bcfe2464370144428eeac56b55f1cfb061109.png']}
+        #epg_data = {'1-2-3.tv': ['4724', 'http://ngiss.t-online.de/cm1s/media/ca0c611992e1d587d76fab310e74ca4e32ff69ab.png'], '13th Street': ['471', 'http://ngiss.t-online.de/cm1s/media/668cd4d06f6981b82841f40fad42bc350babb056.png'], '3sat': ['392', 'http://ngiss.t-online.de/cm1s/media/f0fc63107fddc5c72d70a64f90f9672710e3a3d9.png'], 'AllgÃ¤u TV': ['448', 'http://ngiss.t-online.de/cm1s/media/d37488ac6d2572b3cda8b5abc35f2ef632f46d8d.png'], 'Animal Planet': ['105', 'http://ngiss.t-online.de/cm1s/media/cd0ca6f68c634ba2fd4ce665043f3cefdd1c1c9d.png'], 'Anixe HD': ['452', 'http://ngiss.t-online.de/cm1s/media/7d936048c94ca83281a61951170b5ad0da756584.png'], 'Anixe Serie HD': ['4777', 'http://ngiss.t-online.de/cm1s/media/f105ac8c8e8dbede59277c3b2019c65ea1ecfc95.png'], 'ARD-alpha': ['479', 'http://ngiss.t-online.de/cm1s/media/4f1286373cd3362649d2e4ae1692ab8a360bf773.png'], 'arte': ['394', 'http://ngiss.t-online.de/cm1s/media/a94bb4917f279b02cb739e788c18f38a009f95a0.png'], 'ATV': ['161', 'http://ngiss.t-online.de/cm1s/media/ecd02c711e2a96d79702ef779035c9b03ecb5811.png'], 'Auto Motor und Sport': ['108', 'http://ngiss.t-online.de/cm1s/media/8ffbb0a95849b6c7af04aeaea5c2e1680c6cb0ad.png'], 'AXN': ['110', 'http://ngiss.t-online.de/cm1s/media/df6a8f84c2ecbe26b090e37b782db46b9d98b1bb.png'], 'Baby TV': ['109', 'http://ngiss.t-online.de/cm1s/media/5ba6b3a95fbbbce05e3b62e45196771dbf2fe33e.png'], 'BBC entertainment': ['454', 'http://ngiss.t-online.de/cm1s/media/f41b3e216d38d542dd49f4e3d0f1d21d87dd43cb.png'], 'Beate-Uhse.TV': ['107', 'http://ngiss.t-online.de/cm1s/media/40e5d10666540db54a54bb2092a47faa39a52ec8.png'], 'Bergblick': ['45', 'http://ngiss.t-online.de/cm1s/media/2f68a8b738d31415c99da911bea93a97020ee1f3.png'], 'Bibel TV': ['485', 'http://ngiss.t-online.de/cm1s/media/4754ecc68c5e078e80ac2d5435726b2a9b016b90.png'], 'Bon Gusto': ['117', 'http://ngiss.t-online.de/cm1s/media/65ebe25329d441714dc70fa737e90c68c2a6e129.png'], 'BR': ['407', 'http://ngiss.t-online.de/cm1s/media/40d2ab4ade690ec7e4d965e586a62ca937ee091c.png'], 'Cartoon Network': ['4512', 'http://ngiss.t-online.de/cm1s/media/f73ed871486bd026ffc3ff4cf5e5ac2eeaf6f746.png'], 'Channel21': ['5176', 'http://ngiss.t-online.de/cm1s/media/eb86d7033816033536232cfa5a1c03c396b64d28.png'], 'Comedy Central': ['50', 'http://ngiss.t-online.de/cm1s/media/766e5d3738b790d93690b9a6a40e65b99cb73d6b.png'], 'Crime + Investigation': ['106', 'http://ngiss.t-online.de/cm1s/media/98c3430141aaf756c564aedafebb36d0258f34c1.png'], 'Spiegel TV Wissen': ['186', 'http://ngiss.t-online.de/cm1s/media/7502f4f2236a2916323f079e168237ffd7150a25.png'], 'Das Erste': ['373', 'http://ngiss.t-online.de/cm1s/media/3711d16d0e3570276ebba175620385b5f4ff18f4.png'], 'DAZN 1': ['5507', 'http://ngiss.t-online.de/cm1s/media/7c93cbccfa99c23171441af6ba8f35cd22d9cf28.png'], 'DAZN 2': ['5508', 'http://ngiss.t-online.de/cm1s/media/141a3d65b2f92f7e2a52c93d30a0a29f2184466d.png'], 'Deluxe Music': ['25', 'http://ngiss.t-online.de/cm1s/media/d31840e010d6da58d1aeb2009b04f5a9924481c1.png'], 'Deutsches Musik Fernsehen': ['5312', 'http://ngiss.t-online.de/cm1s/media/febc89b3d6ee8a59fce7915cc9ccc7b4448cfd3e.png'], 'Discovery Channel': ['468', 'http://ngiss.t-online.de/cm1s/media/6e522d9ae4b2a9a8f686281f7d3adff2d8862ee3.png'], 'Disney Channel': ['27', 'http://ngiss.t-online.de/cm1s/media/8ddb880c89e880c0a150c17e355138b0341ed6ee.png'], 'DMAX': ['429', 'http://ngiss.t-online.de/cm1s/media/f47210c8539cdcb85e4c468f83a281f6daa66b58.png'], 'eSPORTS1': ['191', 'http://ngiss.t-online.de/cm1s/media/6e4cee1ab1da1d86af73c1bfb533f11fe7711c5b.png'], 'Eurosport 1': ['389', 'http://ngiss.t-online.de/cm1s/media/18f200745e93b6c9848237acaaa008ea9f520f94.png'], 'Eurosport 2': ['18', 'http://ngiss.t-online.de/cm1s/media/fbc41d77249de69bb35febcff1bb74dd87a3b031.png'], 'GEO Television': ['153', 'http://ngiss.t-online.de/cm1s/media/267643eb7bc861bb7e308a303f66e5301e848db7.png'], 'HH1': ['244', 'http://ngiss.t-online.de/cm1s/media/254cb8179b6bf0b87bf6e8907d184203dbca13b3.png'], 'Heimatkanal': ['661', 'http://ngiss.t-online.de/cm1s/media/daabe8d88933d58ca50ef01e692058fe39759627.png'], 'HGTV': ['3583', 'http://ngiss.t-online.de/cm1s/media/f1d655994f8af8a636f983c9d3fe1a862501766d.png'], 'History Channel': ['162', 'http://ngiss.t-online.de/cm1s/media/c991f75a9b93fb49233fe78cbcc37007d99e01ad.png'], 'hr-fernsehen': ['386', 'http://ngiss.t-online.de/cm1s/media/b11ecb6905afbf9f82d9cd8624c242013a78824e.png'], 'HSE24': ['451', 'http://ngiss.t-online.de/cm1s/media/af654601ccb9e529f85c736e2c66e9fb96d62acc.png'], 'Jukebox': ['132', 'http://ngiss.t-online.de/cm1s/media/9735a7ac5cfcf3c56acd644069751c8c5b72bbe8.png'], 'Kabel 1': ['405', 'http://ngiss.t-online.de/cm1s/media/e92cc62717350cd0378f1191c21a3512362c65a1.png'], 'kabel eins classics': ['157', 'http://ngiss.t-online.de/cm1s/media/3d6c4e11c8058b35f0726c1e25ab1b391a2ada75.png'], 'Kabel Eins Doku': ['573', 'http://ngiss.t-online.de/cm1s/media/ca3279d86270655d49eb50a361e1dcb4564bf39e.png'], 'Kika': ['387', 'http://ngiss.t-online.de/cm1s/media/7d9a501ddc07382fcfdbb0c0797916ba4e78cacd.png'], 'Kinowelt': ['137', 'http://ngiss.t-online.de/cm1s/media/8f80fdd4f8fe6853800aeec106062fc2ee1d5ab4.png'], 'K-TV': ['487', 'http://ngiss.t-online.de/cm1s/media/e942c7a5d723ecea30ee55121067d86cf541f262.png'], 'Lust Pur': ['32', 'http://ngiss.t-online.de/cm1s/media/35264aa89ecba0a3ceb4b0f6f4e0eae0eefb9fcf.png'], 'Marco Polo TV': ['5295', 'http://ngiss.t-online.de/cm1s/media/f8877cba3e440dc9d7d62e1bd51250b06fe2b03a.png'], 'MDR Sachsen': ['370', 'http://ngiss.t-online.de/cm1s/media/8e11c0abde6c90a68507070c73b443401a24fcff.png'], 'MotorVision': ['604', 'http://ngiss.t-online.de/cm1s/media/744220404bda665ff97622e9adc9969540e05895.png'], 'MTV Germany': ['28', 'http://ngiss.t-online.de/cm1s/media/95d8d4289c6a6056f67cac44eded24ad7b8cce8a.png'], 'MÃ¼nchen TV': ['241', 'http://ngiss.t-online.de/cm1s/media/0c7f41025f6eb921088338aaca24116787652f0c.png'], 'N24 Doku': ['553', 'http://ngiss.t-online.de/cm1s/media/bf4ce870d460dcdb3b1e573d58a14137a7d002ea.png'], 'National Geographic': ['35', 'http://ngiss.t-online.de/cm1s/media/c9d4a2fb172069fc67d4170738cdbbc225f079f6.png'], 'Nat Geo Wild': ['569', 'http://ngiss.t-online.de/cm1s/media/deec95134d0baec0f4030cb9c96a1f7348419c30.png'], 'NDR': ['377', 'http://ngiss.t-online.de/cm1s/media/d72e120a384a97f269eb891ad135fb4d115decbb.png'], 'Nick Junior': ['221', 'http://ngiss.t-online.de/cm1s/media/cfa3bf59d761bb21a108955f7dd919d04ef20734.png'], 'NickToons': ['4405', 'http://ngiss.t-online.de/cm1s/media/9361033a288cb7f1f525416eef433f1d47c38abf.png'], 'n-tv': ['376', 'http://ngiss.t-online.de/cm1s/media/1c3073dd69376d57149afdb1791c2576724000f2.png'], 'One': ['402', 'http://ngiss.t-online.de/cm1s/media/70b3ed315768d8799f8577aad1003e4b2758b197.png'], 'PHOENIX': ['371', 'http://ngiss.t-online.de/cm1s/media/0630170ba6401342025bf2ca1b1ed337e653bed5.png'], 'ProSieben': ['374', 'http://ngiss.t-online.de/cm1s/media/a7f56de9d6b8af8708bda4a48349ab6a3f713ecd.png'], 'Pro7 Fun': ['259', 'http://ngiss.t-online.de/cm1s/media/1f0e9026087e023f7464640bcbe4eaed6cce4055.png'], 'ProSieben Maxx': ['396', 'http://ngiss.t-online.de/cm1s/media/8bbd8b6505244eadf79acc39552459c44c052ffa.png'], 'QVC': ['446', 'http://ngiss.t-online.de/cm1s/media/d985b7be308774435b4e824e87857be6d01626a0.png'], 'Radio Bremen TV': ['368', 'http://ngiss.t-online.de/cm1s/media/cd648267d785ddb46756676b9d0b5ee806a60a7d.png'], 'rbb Berlin': ['384', 'http://ngiss.t-online.de/cm1s/media/3c5a2a45fa454d43b49eb1a696cafd0a4eeb1c86.png'], 'RNF': ['246', 'http://ngiss.t-online.de/cm1s/media/c1dd9de99f0eabc4c3f8efa1a6a7c15631783360.png'], 'RiC': ['5329', 'http://ngiss.t-online.de/cm1s/media/d3793d2e6881bb5ba207356a5ac262a4c96264eb.png'], 'Romance TV': ['658', 'http://ngiss.t-online.de/cm1s/media/26147f4735983c4f20ad71c01ba95f25b1a7ccc7.png'], 'RTL': ['404', 'http://ngiss.t-online.de/cm1s/media/3f21af88cf184a45ff4c54be37053ddd678e2456.png'], 'RTL II': ['382', 'http://ngiss.t-online.de/cm1s/media/c2f437c77a06daffbcaa14f5caed1b301abda6b7.png'], 'RTL Crime': ['216', 'http://ngiss.t-online.de/cm1s/media/fda6a6827c4ba695a264061adc0a8813eb83afa7.png'], 'RTL Living': ['227', 'http://ngiss.t-online.de/cm1s/media/df96334494725e0766bf3a22ac6ae3ea88611adf.png'], 'RTL Nitro': ['395', 'http://ngiss.t-online.de/cm1s/media/3e55a412683a498ae7e19077ea81b564bb1b271b.png'], 'RTL Passion': ['209', 'http://ngiss.t-online.de/cm1s/media/f723199cfa53cb06b833be3a91bc36f301fbafc8.png'], 'RTLup': ['542', 'http://ngiss.t-online.de/cm1s/media/f0eab07df247d9f64761c2d9f6e12d244d5ed0b5.png'], 'Sat 1': ['381', 'http://ngiss.t-online.de/cm1s/media/efd5a2c8992cd87d3fcc83b5b2399d12971bf89f.png'], 'Sat.1 emotions': ['224', 'http://ngiss.t-online.de/cm1s/media/fb8cf407e719419c47b394d4307cb3e7aa16c4ae.png'], 'Sat1 Gold HD': ['338', 'http://ngiss.t-online.de/cm1s/media/c4df738dfcdc4307911328c1368b717428f234d8.png'], 'Syfy': ['465', 'http://ngiss.t-online.de/cm1s/media/ea9846917902c635cd3c5b239bd2f0c5d23c0c98.png'], 'Servus TV HD': ['39', 'http://ngiss.t-online.de/cm1s/media/7705473aad92b6a66fbd0d0f845ba5a884d69989.png'], 'SIXX': ['380', 'http://ngiss.t-online.de/cm1s/media/2dc9daa2cdf850169e75d472bd42362f60a0cd7f.png'], 'Sky 1': ['576', 'http://ngiss.t-online.de/cm1s/media/1a2ed987272b88d35770eae839376b8807836a84.png'], 'Sky Action': ['40', 'http://ngiss.t-online.de/cm1s/media/62de0add95c271dede017fb50d22f6de51ffa34d.png'], 'Sky Atlantic': ['264', 'http://ngiss.t-online.de/cm1s/media/e9fd1abc76e3b402cf5ae4f65bf6798741cd214e.png'], 'Sky Sport Bundesliga 1': ['206', 'http://ngiss.t-online.de/cm1s/media/4200a7071dfb0095510d7ed65682da53ba833eec.png'], 'Sky Sport Bundesliga 10': ['5557', 'http://ngiss.t-online.de/cm1s/media/083d140c6df8ca522b605c2c9ca9fb24a92455f3.png'], 'Sky Sport Bundesliga 2': ['211', 'http://ngiss.t-online.de/cm1s/media/157acf7ce820d15b32b3b032403a32fb65958ac2.png'], 'Sky Sport Bundesliga 3': ['199', 'http://ngiss.t-online.de/cm1s/media/059d08de74e6183963d844496ffa1d96b7e264ef.png'], 'Sky Sport Bundesliga 4': ['232', 'http://ngiss.t-online.de/cm1s/media/1896c9e512a830512a50aead481612e623c7fc40.png'], 'Sky Sport Bundesliga 5': ['234', 'http://ngiss.t-online.de/cm1s/media/e1b0693d92286bae1481f232ff087a4f0cd3b7e1.png'], 'Sky Sport Bundesliga 6': ['231', 'http://ngiss.t-online.de/cm1s/media/18b38a657b0333c91513befb793a06e06d5e6f58.png'], 'Sky Sport Bundesliga 7': ['258', 'http://ngiss.t-online.de/cm1s/media/25af99e420b22dc62986815785d2eac63c9d132b.png'], 'Sky Sport Bundesliga 8': ['219', 'http://ngiss.t-online.de/cm1s/media/b23310b91343dae0296d313b692b52dbbdec8d69.png'], 'Sky Sport Bundesliga 9': ['237', 'http://ngiss.t-online.de/cm1s/media/282435adc67782bce8ea32e0b92173f6d76baf4f.png'], 'Sky Cinema Classics': ['200', 'http://ngiss.t-online.de/cm1s/media/14c205585d3d1c5728d0575c661dc0d12c340ef1.png'], 'Sky Cinema Family': ['572', 'http://ngiss.t-online.de/cm1s/media/4af8c51b0aae80d28cb887cd75fe15508aea515f.png'], 'Sky Cinema Fun': ['235', 'http://ngiss.t-online.de/cm1s/media/b49bd59ff13cb015a5ab9243bf102d6b3d1cc4be.png'], 'Sky Cinema +1': ['195', 'http://ngiss.t-online.de/cm1s/media/0b253961f1ed86531231b7ebef4856fe2393998c.png'], 'Sky Cinema+24': ['202', 'http://ngiss.t-online.de/cm1s/media/5371a1404566488319991aef236525c5cdd96fd0.png'], 'Sky Cinema Best Of 2019 HD': ['3844', 'http://ngiss.t-online.de/cm1s/media/2c4c6b314f2e5280c36b01434468d73c7d8c6ab7.png'], 'Sky Cinema Thriller': ['4356', 'http://ngiss.t-online.de/cm1s/media/e72acc4e943682e5c0fc1bc320a6fbe2b9675fd0.png'], 'Sky Crime': ['4924', 'http://ngiss.t-online.de/cm1s/media/55f7af6e6da0e5fe88c98d17969ec3567cde00c6.png'], 'Sky Documentaries': ['5143', 'http://ngiss.t-online.de/cm1s/media/d678db56c8ea3648fe89d02a8b017a8b9a7d9f06.png'], 'Sky Krimi': ['201', 'http://ngiss.t-online.de/cm1s/media/2092514be53beb3a7d0b25a95db91ed27c707c8b.png'], 'Sky Nature': ['5142', 'http://ngiss.t-online.de/cm1s/media/6ed382f8ee9fb14dd678d78dbe4d4d8c2f9ff0c5.png'], 'Sky Replay': ['3756', 'http://ngiss.t-online.de/cm1s/media/5727b8cc057a36b525abafb23b46d02bb24fed70.png'], 'Sky Showcase': ['5577', 'http://ngiss.t-online.de/cm1s/media/09629b5939190f0df366f958f199d6d499b2c4bd.png'], 'Sky Sport 1': ['192', 'http://ngiss.t-online.de/cm1s/media/de52c5d48628b03453d6c09ff0d625ccd9123329.png'], 'Sky Sport 10': ['5554', 'http://ngiss.t-online.de/cm1s/media/402fc1d16a4b7072aa3ec0a6382178a6a874afd6.png'], 'Sky Sport 2': ['212', 'http://ngiss.t-online.de/cm1s/media/a81a83173f2b76a9167bb872d535645d12ff16c5.png'], 'Sky Sport 3': ['189', 'http://ngiss.t-online.de/cm1s/media/1206e226d77c64a66c18676d2a4995ac0d4f528e.png'], 'Sky Sport 4': ['111', 'http://ngiss.t-online.de/cm1s/media/33e321e0ea47007d4fe5840b462f324425c04b77.png'], 'Sky Sport 5': ['114', 'http://ngiss.t-online.de/cm1s/media/174bc4e879e6dfe8da2da79a20d1cd12a2e64a11.png'], 'Sky Sport 6': ['113', 'http://ngiss.t-online.de/cm1s/media/dccedc966ee1e760137bbf38f34d86f0793ab7ed.png'], 'Sky Sport 7': ['127', 'http://ngiss.t-online.de/cm1s/media/2f260de91a03cc79f32ad816be1aae5e424fc523.png'], 'Sky Sport 8': ['261', 'http://ngiss.t-online.de/cm1s/media/b355966e88194e9b72e2879cece8735834a1b45a.png'], 'Sky Sport 9': ['187', 'http://ngiss.t-online.de/cm1s/media/68a5a9c16947d1423678be66c7223fc5f4e5d037.png'], 'Sky Sport Bundesliga': ['42', 'http://ngiss.t-online.de/cm1s/media/cf8a1da7411cef9e690ad178cedbd9dbe13ebdbd.png'], 'Sky Sport F1': ['4889', 'http://ngiss.t-online.de/cm1s/media/67d611a4e282db524f86d9424d2ce0921bdca5a3.png'], 'Sky Sport Golf': ['5558', 'http://ngiss.t-online.de/cm1s/media/20375ea6aa459f3e75ff52ef8dd025257f91c453.png'], 'Sky Sport Mix HD': ['5556', 'http://ngiss.t-online.de/cm1s/media/5494143bb12d192a5c0b69b5f93c2d3368e00fbd.png'], 'Sky Sport News': ['190', 'http://ngiss.t-online.de/cm1s/media/73b37ddf8cadce6a5c4a1ebdf70a526c2ae93719.png'], 'Sky Sport Premier League': ['5555', 'http://ngiss.t-online.de/cm1s/media/398c412f21c4d52385bffd49f852338d56b43808.png'], 'Sky Sport Tennis': ['198', 'http://ngiss.t-online.de/cm1s/media/e69c367167782ff684da93d889c980eec8ea0bfd.png'], 'Sky Sport Top Event': ['31', 'http://ngiss.t-online.de/cm1s/media/8693b13e8355d376c9b2c53e515e7f85abe659d9.png'], 'Sonnenklar': ['486', 'http://ngiss.t-online.de/cm1s/media/14573aebde590f886d975d5193a26dc6065c0683.png'], 'Spiegel Geschichte HD': ['4406', 'http://ngiss.t-online.de/cm1s/media/cb6141ae4226647544a9af4b6d69e41d557fe894.png'], 'Sport1+': ['44', 'http://ngiss.t-online.de/cm1s/media/074034f464715db15c5859b60b36558cac35a5e3.png'], 'Sportdigital': ['194', 'http://ngiss.t-online.de/cm1s/media/36207a17b0a5760b3977dcf130e53ce30f09c594.png'], 'SR Fernsehen': ['379', 'http://ngiss.t-online.de/cm1s/media/784cfb3e89c660ecf9f02bae301f40f875996af9.png'], 'Super RTL': ['403', 'http://ngiss.t-online.de/cm1s/media/d83d20be89d5f6899d8885b944b109928f7a3171.png'], 'SWR Fernsehen RP': ['393', 'http://ngiss.t-online.de/cm1s/media/033802069c0c3086585d215e0592501669f15f1c.png'], 'SÃ¼dwest Fernsehen': ['398', 'http://ngiss.t-online.de/cm1s/media/033802069c0c3086585d215e0592501669f15f1c.png'], 'tagesschau24': ['400', 'http://ngiss.t-online.de/cm1s/media/2d0ef79c908ad450db7ddc28eaf7076a02e162af.png'], 'Tele 5': ['48', 'http://ngiss.t-online.de/cm1s/media/05452ad179e25678e50434da167e2f3ede2a9f60.png'], 'TLC': ['383', 'http://ngiss.t-online.de/cm1s/media/bd43973022bc8b5e4e44ecaf07cbeaaca3943fd6.png'], 'TOGGOplus': ['601', 'http://ngiss.t-online.de/cm1s/media/35d704a6beeecc53be277ba5e9342ddca6df5e0a.png'], 'Universal Channel': ['185', 'http://ngiss.t-online.de/cm1s/media/1994bd733a17fbcd32d1d78dc43b28c362776f5b.png'], 'VOX': ['385', 'http://ngiss.t-online.de/cm1s/media/0e5b4d41d518a068a0bef830d64f848b84ac39d1.png'], 'VOXup': ['3930', 'http://ngiss.t-online.de/cm1s/media/7475b5f5fce6df60756901f94904c42d2675c6d9.png'], 'Warner Comedy': ['181', 'http://ngiss.t-online.de/cm1s/media/793f9b574904a15207169109b57f7b52979e9d14.png'], 'Warner Film': ['184', 'http://ngiss.t-online.de/cm1s/media/a4a10078c8d5e31bb59574f9fb4df3ae7d6f975b.png'], 'Warner Serie': ['53', 'http://ngiss.t-online.de/cm1s/media/ac63870aec09e2977583b416e2547620552e6c4d.png'], 'WDR KÃ¶ln': ['397', 'http://ngiss.t-online.de/cm1s/media/8784546120200060bc84357fcafd0994d648ee40.png'], 'wedo movies': ['5399', 'http://ngiss.t-online.de/cm1s/media/f45a2a145e9188a561e5cbf4e6e77a48e2388fd3.png'], 'Welt': ['375', 'http://ngiss.t-online.de/cm1s/media/949412402d4f2ba8cf1b63ebed3223b6c652765d.png'], 'Welt der Wunder': ['60', 'http://ngiss.t-online.de/cm1s/media/629f72770f72b4f816843f063e0281d9b3d355d9.png'], 'wetter.com TV': ['571', 'http://ngiss.t-online.de/cm1s/media/18ebe2c3ee90c1060da7a5498d2f7e846321271b.png'], 'ZDF': ['408', 'http://ngiss.t-online.de/cm1s/media/35d71e6d09f3551cb4053da8487b3028cf9339cd.png'], 'ZDFinfokanal': ['378', 'http://ngiss.t-online.de/cm1s/media/60641d1e04421f17dd4369382a389b0d7599b736.png'], 'ZDF neo': ['391', 'http://ngiss.t-online.de/cm1s/media/9f4bcfe2464370144428eeac56b55f1cfb061109.png']}
+    if int(addon.getSetting("epg_provider")) == 1:
+        epg_data = {'1-2-3.tv': ['123TV', 'http://live.tvspielfilm.de/static/images/channels/large/123TV.png'], '13th Street': ['13TH', 'http://live.tvspielfilm.de/static/images/channels/large/13TH.png'], '3sat': ['3SAT', 'http://live.tvspielfilm.de/static/images/channels/large/3SAT.png'], 'Animal Planet': ['APLAN', 'http://live.tvspielfilm.de/static/images/channels/large/APLAN.png'], 'Anixe HD': ['ANIXE', 'http://live.tvspielfilm.de/static/images/channels/large/ANIXE.png'], 'ARD-alpha': ['ALPHA', 'http://live.tvspielfilm.de/static/images/channels/large/ALPHA.png'], 'arte': ['ARTE', 'http://live.tvspielfilm.de/static/images/channels/large/ARTE.png'], 'Auto Motor und Sport': ['AMS', 'http://live.tvspielfilm.de/static/images/channels/large/AMS.png'], 'AXN': ['AXN', 'http://live.tvspielfilm.de/static/images/channels/large/AXN.png'], 'Bibel TV': ['BIBEL', 'http://live.tvspielfilm.de/static/images/channels/large/BIBEL.png'], 'BR': ['BR', 'http://live.tvspielfilm.de/static/images/channels/large/BR.png'], 'Cartoon Network': ['C-NET', 'http://live.tvspielfilm.de/static/images/channels/large/C-NET.png'], 'Comedy Central': ['CC', 'http://live.tvspielfilm.de/static/images/channels/large/CC.png'], 'Crime + Investigation': ['CRIN', 'http://live.tvspielfilm.de/static/images/channels/large/CRIN.png'], 'Spiegel TV Wissen': ['SPTVW', 'http://live.tvspielfilm.de/static/images/channels/large/SPTVW.png'], 'Das Erste': ['ARD', 'http://live.tvspielfilm.de/static/images/channels/large/ARD.png'], 'DAZN 1': ['DAZN', 'http://live.tvspielfilm.de/static/images/channels/large/DAZN.png'], 'Deluxe Music': ['DMC', 'http://live.tvspielfilm.de/static/images/channels/large/DMC.png'], 'Deutsches Musik Fernsehen': ['DMF', 'http://live.tvspielfilm.de/static/images/channels/large/DMF.png'], 'Discovery Channel': ['HDDIS', 'http://live.tvspielfilm.de/static/images/channels/large/HDDIS.png'], 'Disney Channel': ['DISNE', 'http://live.tvspielfilm.de/static/images/channels/large/DISNE.png'], 'DMAX': ['DMAX', 'http://live.tvspielfilm.de/static/images/channels/large/DMAX.png'], 'Eurosport 1': ['EURO', 'http://live.tvspielfilm.de/static/images/channels/large/EURO.png'], 'Eurosport 2': ['EURO2', 'http://live.tvspielfilm.de/static/images/channels/large/EURO2.png'], 'Heimatkanal': ['HEIMA', 'http://live.tvspielfilm.de/static/images/channels/large/HEIMA.png'], 'History Channel': ['HISHD', 'http://live.tvspielfilm.de/static/images/channels/large/HISHD.png'], 'hr-fernsehen': ['HR', 'http://live.tvspielfilm.de/static/images/channels/large/HR.png'], 'Jukebox': ['JUKE', 'http://live.tvspielfilm.de/static/images/channels/large/JUKE.png'], 'Kabel 1': ['K1', 'http://live.tvspielfilm.de/static/images/channels/large/K1.png'], 'kabel eins classics': ['K1CLA', 'http://live.tvspielfilm.de/static/images/channels/large/K1CLA.png'], 'Kabel Eins Doku': ['K1DOKU', 'http://live.tvspielfilm.de/static/images/channels/large/K1DOKU.png'], 'Kika': ['KIKA', 'http://live.tvspielfilm.de/static/images/channels/large/KIKA.png'], 'Kinowelt': ['KINOW', 'http://live.tvspielfilm.de/static/images/channels/large/KINOW.png'], 'K-TV': ['KTV', 'http://live.tvspielfilm.de/static/images/channels/large/KTV.png'], 'MDR Sachsen': ['MDR', 'http://live.tvspielfilm.de/static/images/channels/large/MDR.png'], 'MotorVision': ['MOVTV', 'http://live.tvspielfilm.de/static/images/channels/large/MOVTV.png'], 'MTV Germany': ['MTV', 'http://live.tvspielfilm.de/static/images/channels/large/MTV.png'], 'N24 Doku': ['N24DOKU', 'http://live.tvspielfilm.de/static/images/channels/large/N24DOKU.png'], 'National Geographic': ['N-GHD', 'http://live.tvspielfilm.de/static/images/channels/large/N-GHD.png'], 'Nat Geo Wild': ['N-GW', 'http://live.tvspielfilm.de/static/images/channels/large/N-GW.png'], 'NDR': ['N3', 'http://live.tvspielfilm.de/static/images/channels/large/N3.png'], 'Nick Junior': ['NICKJ', 'http://live.tvspielfilm.de/static/images/channels/large/NICKJ.png'], 'NickToons': ['NICKT', 'http://live.tvspielfilm.de/static/images/channels/large/NICKT.png'], 'n-tv': ['NTV', 'http://live.tvspielfilm.de/static/images/channels/large/NTV.png'], 'One': ['FES', 'http://live.tvspielfilm.de/static/images/channels/large/FES.png'], 'PHOENIX': ['PHOEN', 'http://live.tvspielfilm.de/static/images/channels/large/PHOEN.png'], 'ProSieben': ['PRO7', 'http://live.tvspielfilm.de/static/images/channels/large/PRO7.png'], 'Pro7 Fun': ['PRO7F', 'http://live.tvspielfilm.de/static/images/channels/large/PRO7F.png'], 'ProSieben Maxx': ['PRO7M', 'http://live.tvspielfilm.de/static/images/channels/large/PRO7M.png'], 'Romance TV': ['ROM', 'http://live.tvspielfilm.de/static/images/channels/large/ROM.png'], 'RTL': ['RTL', 'http://live.tvspielfilm.de/static/images/channels/large/RTL.png'], 'RTL II': ['RTL2', 'http://live.tvspielfilm.de/static/images/channels/large/RTL2.png'], 'RTL Crime': ['RTL-C', 'http://live.tvspielfilm.de/static/images/channels/large/RTL-C.png'], 'RTL Living': ['RTL-L', 'http://live.tvspielfilm.de/static/images/channels/large/RTL-L.png'], 'RTL Nitro': ['RTL-N', 'http://live.tvspielfilm.de/static/images/channels/large/RTL-N.png'], 'RTL Passion': ['PASS', 'http://live.tvspielfilm.de/static/images/channels/large/PASS.png'], 'RTLup': ['RTLPL', 'http://live.tvspielfilm.de/static/images/channels/large/RTLPL.png'], 'Sat 1': ['SAT1', 'http://live.tvspielfilm.de/static/images/channels/large/SAT1.png'], 'Sat.1 emotions': ['SAT1E', 'http://live.tvspielfilm.de/static/images/channels/large/SAT1E.png'], 'Sat1 Gold HD': ['SAT1G', 'http://live.tvspielfilm.de/static/images/channels/large/SAT1G.png'], 'Syfy': ['SCIFI', 'http://live.tvspielfilm.de/static/images/channels/large/SCIFI.png'], 'SIXX': ['SIXX', 'http://live.tvspielfilm.de/static/images/channels/large/SIXX.png'], 'Sky 1': ['SKY1', 'http://live.tvspielfilm.de/static/images/channels/large/SKY1.png'], 'Sky Action': ['SKY-A', 'http://live.tvspielfilm.de/static/images/channels/large/SKY-A.png'], 'Sky Atlantic': ['SKYAT', 'http://live.tvspielfilm.de/static/images/channels/large/SKYAT.png'], 'Sky Sport Bundesliga 1': ['BULI', 'http://live.tvspielfilm.de/static/images/channels/large/BULI.png'], 'Sky Cinema Classics': ['SKY-N', 'http://live.tvspielfilm.de/static/images/channels/large/SKY-N.png'], 'Sky Cinema Family': ['SKY-F', 'http://live.tvspielfilm.de/static/images/channels/large/SKY-F.png'], 'Sky Cinema +1': ['CIN', 'http://live.tvspielfilm.de/static/images/channels/large/CIN.png'], 'Sky Krimi': ['SKY-K', 'http://live.tvspielfilm.de/static/images/channels/large/SKY-K.png'], 'Sky Sport F1': ['SKYF1', 'http://live.tvspielfilm.de/static/images/channels/large/SKYF1.png'], 'Sky Sport News': ['SNHD', 'http://live.tvspielfilm.de/static/images/channels/large/SNHD.png'], 'Sonnenklar': ['SKLAR', 'http://live.tvspielfilm.de/static/images/channels/large/SKLAR.png'], 'Spiegel Geschichte HD': ['SP-GE', 'http://live.tvspielfilm.de/static/images/channels/large/SP-GE.png'], 'Sportdigital': ['SPO-D', 'http://live.tvspielfilm.de/static/images/channels/large/SPO-D.png'], 'SR Fernsehen': ['SF1', 'http://live.tvspielfilm.de/static/images/channels/large/SF1.png'], 'Super RTL': ['SUPER', 'http://live.tvspielfilm.de/static/images/channels/large/SUPER.png'], 'SÃ¼dwest Fernsehen': ['SWR', 'None'], 'tagesschau24': ['TAG24', 'http://live.tvspielfilm.de/static/images/channels/large/TAG24.png'], 'TLC': ['TLC', 'http://live.tvspielfilm.de/static/images/channels/large/TLC.png'], 'TOGGOplus': ['TOGGO', 'http://live.tvspielfilm.de/static/images/channels/large/TOGGO.png'], 'Universal Channel': ['UNIVE', 'http://live.tvspielfilm.de/static/images/channels/large/UNIVE.png'], 'VOX': ['VOX', 'http://live.tvspielfilm.de/static/images/channels/large/VOX.png'], 'VOXup': ['VOXUP', 'http://live.tvspielfilm.de/static/images/channels/large/VOXUP.png'], 'Warner Comedy': ['TNT-C', 'http://live.tvspielfilm.de/static/images/channels/large/TNT-C.png'], 'Warner Film': ['TNT-F', 'http://live.tvspielfilm.de/static/images/channels/large/TNT-F.png'], 'Warner Serie': ['TNT-S', 'http://live.tvspielfilm.de/static/images/channels/large/TNT-S.png'], 'WDR KÃ¶ln': ['WDR', 'http://live.tvspielfilm.de/static/images/channels/large/WDR.png'], 'Welt': ['WELT', 'http://live.tvspielfilm.de/static/images/channels/large/WELT.png'], 'Welt der Wunder': ['WDWTV', 'http://live.tvspielfilm.de/static/images/channels/large/WDWTV.png'], 'ZDF': ['ZDF', 'http://live.tvspielfilm.de/static/images/channels/large/ZDF.png'], 'ZDFinfokanal': ['ZINFO', 'http://live.tvspielfilm.de/static/images/channels/large/ZINFO.png'], 'ZDF neo': ['2NEO', 'http://live.tvspielfilm.de/static/images/channels/large/2NEO.png']}
+    #for row in cur.execute('SELECT * FROM epgs'):
+        #if not row['tid'] == '' and not row['tid'] == None:
+            #epg_data[row['display']] = [ str(row['tid']), str(row['tl']) ]
+    #xbmc.log('EPG_DATA %s' % str(epg_data), xbmc.LOGINFO)
+    return epg_data
+
+def getchannels(type=None, group=None):
+    if getSetting("stalker") == "true" and not type == "vavoo":
+        allchannels = get_stalker_channels() if type == None else get_stalker_channels([group])
+    else: allchannels = {}
+    if getSetting("vavoo") == "true" and not type == "stalker":
+        from vavoo.vavoo_tv import get_vav_channels
+        vav_channels = get_vav_channels() if type == None else get_vav_channels([group])
+    else: vav_channels = {}
+    for k, v in vav_channels.items():
+        if k not in allchannels: allchannels[k] = []
+        for n in v: allchannels[k].append(n)
+    return allchannels
+
+def handle_wait(kanal):
+    create = progress.create("Abbrechen zur manuellen Auswahl", "STARTE  : %s" % kanal)
+    time_to_wait = int(getSetting("count")) + 1
+    for secs in range(1, time_to_wait):
+        secs_left = time_to_wait - secs
+        progress.update(int(secs / time_to_wait * 100), "STARTE  : %s\nStarte Stream in  : %s" % (kanal, secs_left))
+        monitor.waitForAbort(1)
+        if (progress.iscanceled()):
+            progress.close()
+            return False
+    progress.close()
+    return True
+
+def livePlay(name, type=None, group=None):
+    m = getchannels(type, group).get(name)
+    if not m:
+        showFailedNotification()
+        return
+    i, title = 0, None
+    if len(m) > 1:
+        if getSetting("auto") == "0":
+            cacheOk, last = get_cache("last")
+            if cacheOk and last.get("idn") == name: i = last.get("num") + 1
+            if i >= len(m): i = 0
+            title = "%s (%s/%s)" % (name, i + 1, len(m))  # wird verwendet für infoLabels
+        elif getSetting("auto") == "1":
+            if not handle_wait(name):  # Dialog aufrufen
+                cap = []
+                for i, n in enumerate(m, 1): cap.append("STREAM %s" % i)
+                i = selectDialog(cap)
+                if i < 0: return
+            title = "%s (%s/%s)" % (name, i + 1, len(m))  # wird verwendet für infoLabels
+        else:
+            cap = []
+            for i, n in enumerate(m, 1): cap.append("STREAM %s" % i)
+            i = selectDialog(cap)
+            if i < 0: return
+            title = "%s (%s/%s)" % (name, i + 1, len(m))  # wird verwendet für infoLabels
+    k = 0
+    while True:
+        k += 1
+        if k > len(m): return
+        url, headers = resolve_link(m[i])
+        if url: break
+        else:
+            i += 1
+            if i >= len(m): i = 0
+    set_cache("last", {"idn": name, "num": i}, 7200)
+    title = title if title else name
+    epg = get_epg_data()
+    plot = "[B]%s[/B] - Stream %s von %s" % (name, i+1, len(m))
+    xbmc.log('IF!!!!!!', xbmc.LOGINFO)
+    if con and name in epg:
+        cur = con.cursor()
+        utc = int(time.strftime("%z", time.localtime())[1:3])*3600
+        timestamp = int(time.time()) - utc
+        cur.execute('SELECT * FROM epg WHERE cid="' + str(epg[name][0]) + '" AND start < "' + str(timestamp) + '" AND end > "' + str(timestamp) + '"')
+        data = cur.fetchone()
+        if data:
+            xbmc.log('DATA!!!!!!', xbmc.LOGINFO)
+            desc = base64.b64decode(data['title']).decode("utf-8")
+            start = datetime.fromtimestamp(int(data['start'])+utc)
+            ende = datetime.fromtimestamp(int(data['end'])+utc)
+            plot = "[B]Now:[/B] (%s Uhr - %s Uhr) [B]%s[/B]" % (str(start.strftime("%H:%M")), str(ende.strftime("%H:%M")), str(desc))
+            cur.execute('SELECT * FROM epg WHERE cid="' + str(epg[name][0]) + '" AND start > "' + str(timestamp) + '"')
+            data = cur.fetchone()
+            if data:
+                desc = base64.b64decode(data['title']).decode("utf-8")
+                start = datetime.fromtimestamp(int(data['start'])+utc)
+                ende = datetime.fromtimestamp(int(data['end'])+utc)
+                plot += "\n[B]Next:[/B] (%s Uhr - %s Uhr) [B]%s[/B]" % (str(start.strftime("%H:%M")), str(ende.strftime("%H:%M")), str(desc))
+    infoLabels={"title": title, "plot": plot}
+    #infoLabels = {"title": title, "plot": "[B]%s[/B] - Stream %s von %s" % (name, i + 1, len(m))}
+    o = ListItem(name)
+    log("Spiele %s" % url)
+    if "hls" in url or "m3u8" in url: inputstream = "inputstream.ffmpegdirect" if getSetting("hlsinputstream") == "0" else "inputstream.adaptive"
+    else: inputstream = "inputstream.ffmpegdirect"
+    o.setProperty("inputstream", inputstream)
+    if inputstream == "inputstream.ffmpegdirect":
+        o.setProperty("inputstream.ffmpegdirect.is_realtime_stream", "true")
+        o.setProperty("inputstream.ffmpegdirect.stream_mode", "timeshift")
+        if getSetting("openmode") != "0": o.setProperty("inputstream.ffmpegdirect.open_mode", "ffmpeg" if getSetting("openmode") == "1" else "curl")
+        if "hls" in url or "m3u8" in url: o.setProperty("inputstream.ffmpegdirect.manifest_type", "hls")
+    if headers:
+        if inputstream == "inputstream.adaptive":
+            o.setProperty(f'{inputstream}.common_headers', headers)
+            o.setProperty(f'{inputstream}.stream_headers', headers)
+        else: url += f"|{headers}"
+    o.setPath(url)
+    o.setProperty("IsPlayable", "true")
+    if tagger:
+        info_tag = ListItemInfoTag(o, 'video')
+        info_tag.set_info(infoLabels)
+    else: o.setInfo("Video", infoLabels) # so kann man die Stream Auswahl auch sehen (Info)
+    set_resolved(o)
+    end()
+
+def makem3u():
+    m3u = ["#EXTM3U\n"]
+    for name in getchannels(): m3u.append('#EXTINF:-1 group-title="Standart",%s\nplugin://plugin.video.vavooto/?name=%s\n' % (name.strip(), name.replace("&", "%26").replace("+", "%2b").strip()))
+    m3uPath = os.path.join(addonprofile, "vavoo.m3u")
+    with open(m3uPath, "w") as a:
+        a.writelines(m3u)
+    ok = dialog.ok('VAVOO.TO', 'm3u erstellt in %s' % m3uPath)
+
+# edit kasi
+def channels(items=None, type=None, group=None):
+    try: lines = json.loads(getSetting("favs"))
+    except: lines = []
+    results = json.loads(items) if items else getchannels(type, group)
+    epg = get_epg_data()
+    for name in results:
+        index = len(results[name])
+        title = name if getSetting("stream_count") == "false" or index == 1 else "%s  (%s)" % (name, index)
+        o = ListItem(name)
+        img = "%s.png" % name.replace(" ", "").lower()
+        iconimage = "DefaultTVShows.png"
+        if img in chanicons: iconimage = "https://michaz1988.github.io/logos/%s" % img
+        o.setArt({"icon": iconimage, "thumb": iconimage, "poster": iconimage})
+        cm = []
+        if not name in lines:
+            cm.append(("zu TV Favoriten hinzufügen", "RunPlugin(%s?action=addTvFavorit&name=%s)" % (sys.argv[0], name.replace("&", "%26").replace("+", "%2b"))))
+            plot = ""
+        else:
+            plot = "[COLOR gold]TV Favorit[/COLOR]"
+            cm.append(("von TV Favoriten entfernen", "RunPlugin(%s?action=delTvFavorit&name=%s)" % (sys.argv[0], name.replace("&", "%26").replace("+", "%2b"))))
+        cm.append(("Einstellungen", "RunPlugin(%s?action=settings)" % sys.argv[0]))
+        if con and name in epg:
+            o.setArt({ 'thumb': str(epg[name][1]), 'poster' : str(epg[name][1]), 'icon': str(epg[name][1]), 'fanart': str(epg[name][1]) })
+            cur = con.cursor()
+            utc = int(time.strftime("%z", time.localtime())[1:3])*3600
+            timestamp = int(time.time()) - utc
+            cur.execute('SELECT * FROM epg WHERE cid="' + str(epg[name][0]) + '" AND start < "' + str(timestamp) + '" AND end > "' + str(timestamp) + '"')
+            data = cur.fetchone()
+            if data:
+                #xbmc.log('IF1!!!!!! %s' % name, xbmc.LOGINFO)
+                desc = base64.b64decode(data['title']).decode("utf-8")
+                start = datetime.fromtimestamp(int(data['start'])+utc)
+                ende = datetime.fromtimestamp(int(data['end'])+utc)
+                plot += "[B]Now:[/B]\n(%s Uhr - %s Uhr) [B]%s[/B]\n" % (str(start.strftime("%H:%M")), str(ende.strftime("%H:%M")), str(desc))
+                cur.execute('SELECT * FROM epg WHERE cid="' + str(epg[name][0]) + '" AND start > "' + str(timestamp) + '"')
+                data = cur.fetchone()
+                if data:
+                    #xbmc.log('IF2!!!!!! %s' % name, xbmc.LOGINFO)
+                    desc = base64.b64decode(data['title']).decode("utf-8")
+                    start = datetime.fromtimestamp(int(data['start'])+utc)
+                    ende = datetime.fromtimestamp(int(data['end'])+utc)
+                    plot += "\n[B]Next:[/B]\n(%s Uhr - %s Uhr) [B]%s[/B]\n" % (str(start.strftime("%H:%M")), str(ende.strftime("%H:%M")), str(desc))
+        cm.append(("m3u erstellen", "RunPlugin(%s?action=makem3u)" % sys.argv[0]))
+        o.addContextMenuItems(cm)
+        infoLabels = {"title": title, "plot": plot}
+        if tagger:
+            info_tag = ListItemInfoTag(o, 'video')
+            info_tag.set_info(infoLabels)
+        else: o.setInfo("Video", infoLabels)
+        o.setProperty("IsPlayable", "true")
+        param = {"name": name, "type": type, "group": group} if type else {"name": name}
+        add(param, o)
+    sort_method()
+    end()
+
+def favchannels():
+    try: lines = json.loads(getSetting("favs"))
+    except: return
+    for name in getchannels():
+        if not name in lines: continue
+        o = ListItem(name)
+        img = "%s.png" % name.replace(" ", "").lower()
+        iconimage = "DefaultTVShows.png"
+        if img in chanicons: iconimage = "https://michaz1988.github.io/logos/%s" % img
+        o.setArt({"icon": iconimage, "thumb": iconimage, "poster": iconimage})
+        cm = []
+        cm.append(("von TV Favoriten entfernen", "RunPlugin(%s?action=delTvFavorit&name=%s)" % (sys.argv[0], name.replace("&", "%26").replace("+", "%2b"))))
+        cm.append(("Einstellungen", "RunPlugin(%s?action=settings)" % sys.argv[0]))
+        o.addContextMenuItems(cm)
+        infoLabels = {"title": name, "plot": "[COLOR gold]Liste der eigene Live Favoriten[/COLOR]"}
+        info_tag = ListItemInfoTag(o, 'video')
+        info_tag.set_info(infoLabels)
+        o.setProperty("IsPlayable", "true")
+        add({"name": name}, o)
+    sort_method()
+    end()
+
+def change_favorit(name, delete=False):
+    try:lines = json.loads(getSetting("favs"))
+    except: lines = []
+    if delete: lines.remove(name)
+    else: lines.append(name)
+    setSetting("favs", json.dumps(lines))
+    if len(lines) == 0: execute("Action(ParentDir)")
+    else: execute("Container.Refresh")
