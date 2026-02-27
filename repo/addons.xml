@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addons>
+  <addon id="plugin.video.vavooto"
+         name="VAVOO.TO"
+         version="2025.11.10-2"
+         provider-name="edit by der andere">
+    <extension point="xbmc.addon.repository"
+               name="VAVOO.TO Repository"
+               info="https://example.com/repo/addons.xml"
+               checksum="https://example.com/repo/addons.xml.md5"
+               datadir="https://example.com/repo/zips/"
+               zip="true"/>
+    <extension point="xbmc.addon.metadata">
+      <summary lang="de">VAVOO.TO Addon Repository</summary>
+      <description lang="de">Repository für das VAVOO.TO Addon</description>
+      <platform>all</platform>
+    </extension>
+  </addon>
+</addons>

@@ -6,7 +6,7 @@ BASEURL = "https://vavoo.to/ccapi/"
 
 def menu(params):
     set_content("files")
-    # edit kasi
+    # edit by der andere
     # if len(lines)>0: addDir2("TV Favoriten (Live)", "DefaultAddonPVRClient", "favchannels")
     # addDir2("Live", "DefaultAddonPVRClient", "channels")
     addDir2("Live", "DefaultAddonPVRClient", "live")
@@ -45,21 +45,12 @@ def group_tv(params):
         gruppen, hash = vavoo_groups()
         for group in gruppen:
             addDir2(group.encode().decode("ascii", errors="ignore"), "DefaultAddonPVRClient", "channels", type="vavoo", group=group)
-    elif params.get("type")=="stalker":
-        from vavoo.stalker import StalkerPortal
-        portal = StalkerPortal(get_cache_or_setting("stalkerurl"), get_cache_or_setting("mac"))
-        gruppen = portal.genres()
-        for title, groupid in  gruppen.items():
-            addDir2(title.encode().decode("ascii", errors="ignore"), "DefaultAddonPVRClient", "channels", type="stalker", group=groupid)
+    # edit by der andere: Stalker-Logik entfernt
     else:
-        if getSetting("vavoo") == "true" and getSetting("stalker") == "true":
-            addDir2("VAVOO - GRUPPEN", "DefaultAddonPVRClient", "group_tv", type="vavoo")
-            addDir2("STALKER - GRUPPEN", "DefaultAddonPVRClient", "group_tv", type="stalker")
-        elif getSetting("vavoo") == "true":
+        if getSetting("vavoo") == "true":
             group_tv({"type":"vavoo"})
-        elif getSetting("stalker") == "true":
-            group_tv({"type":"stalker"})
-        else: return
+        else:
+            return
     end()
 
 def a_z_tv(params):
@@ -127,8 +118,8 @@ def genres(params):
     serie_genrelist = [
         {"genre": "Action & Adventure", "icon":"Adventure"}, {"genre": "Animation", "icon":"Animation"}, {"genre": "Komödie", "icon":"Comedy"}, {"genre": "Krimi", "icon":"Crime"},
         {"genre": "Dokumentarfilm", "icon":"Documentary"}, {"genre": "Drama", "icon":"Drama"}, {"genre": "Familie", "icon":"Family"}, {"genre": "Kids", "icon":"Children"},
-        {"genre": "Mystery", "icon":"Mystery"}, {"genre": "News", "icon":"News"}, {"genre": "Reality", "icon":"Reality-TV"}, {"genre": "Sci-Fi & Fantasy", "icon":"Sci-Fi"},    # edit Reality by kasi
-        {"genre": "Soap", "icon":"Sitcom"}, {"genre": "Talk", "icon":"Biography"}, {"genre": "War & Politics", "icon":"War"}, {"genre": "Western", "icon":"Western"}]            # edit Soap by kasi
+        {"genre": "Mystery", "icon":"Mystery"}, {"genre": "News", "icon":"News"}, {"genre": "Reality", "icon":"Reality-TV"}, {"genre": "Sci-Fi & Fantasy", "icon":"Sci-Fi"},    # edit by der andere
+        {"genre": "Soap", "icon":"Sitcom"}, {"genre": "Talk", "icon":"Biography"}, {"genre": "War & Politics", "icon":"War"}, {"genre": "Western", "icon":"Western"}]            # edit by der andere
     movie_genrelist = [
         {"genre": "Action", "icon":"Action"}, {"genre": "Abenteuer", "icon":"Adventure"}, {"genre": "Animation", "icon":"Animation"}, {"genre": "Komödie", "icon":"Comedy"},
         {"genre": "Krimi", "icon":"Crime"}, {"genre": "Dokumentarfilm", "icon":"Documentary"}, {"genre": "Drama", "icon":"Drama"}, {"genre": "Familie", "icon":"Family"},

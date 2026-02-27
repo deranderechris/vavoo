@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="plugin.video.vavooto" name="VAVOO.TO" version="2025.11.10-2" provider-name="kasi,michaz edit by Mastaaa">
+<addon id="plugin.video.vavooto" name="VAVOO.TO" version="2025.11.10-2" provider-name="edit by der andere">
 	<requires>
 		<import addon="script.module.requests"/>
 		<import addon="script.module.resolveurl"/>
@@ -11,7 +11,7 @@
 	<extension point="xbmc.python.pluginsource" library="resources/main.py">
 		<provides>video</provides>
 	</extension>
-	<extension point="xbmc.service" library="resources/service.py" start="startup" /> <!-- added by mastaaa -->
+	<extension point="xbmc.service" library="resources/service.py" start="startup" /> <!-- edit by der andere -->
 	<extension point="xbmc.python.module" library="resources" />
 	<extension point="xbmc.addon.metadata">
 		<assets>

@@ -45,7 +45,7 @@ getCondV = xbmc.getCondVisibility
 db = os.path.join(cachepath, 'tmp.db')
 con = sqlite3.connect(db)
 con.row_factory = lambda c, r: dict([(col[0], r[idx]) for idx, col in enumerate(c.description)])
-con.text_factory = lambda x: str(x, errors='ignore')
+con.text_factory = lambda x: str(x, errors='ignore') # edit by der andere
 
 def clear(auto=False):
     for a in os.listdir(cachepath):

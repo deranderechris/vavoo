@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
-# edit 2024-12-05 kasi
+# edit by der andere
 
 if __name__ == "__main__":
     from vavoo.utils import *
     from vavoo.epg import service as epg
-    from vavoo import vjackson, stalker, vavoo_tv, vjlive
+    from vavoo import vjackson, vavoo_tv, vjlive
     joyn_token=translatePath("special://profile/addon_data/plugin.video.joyn/data/auth_tokens")
     if exists(joyn_token):
         try:
@@ -25,15 +25,13 @@ if __name__ == "__main__":
         else: vjlive.livePlay(tv, params.get('type'), params.get('group'))
     elif action == None: vjackson.menu(params)
     elif action == "choose": vavoo_tv.choose()
-    elif action == "get_genres": stalker.get_genres()
-    elif action == "choose_portal": stalker.choose_portal()
-    elif action == "new_mac": stalker.new_mac()
+    # edit by der andere: Stalker-Logik entfernt
     elif action == "clear": clear()
     elif action == "delete_search": delete_search(params)
     elif action == "delallTvFavorit":
         setSetting("favs", "[]")
         execute('Container.Refresh')
-    # edit kasi
+    # edit by der andere
     elif action == "channels": vjlive.channels(params.get('items'), params.get('type'), params.get('group'))
     elif action == "settings": openSettings(sys.argv[1])
     elif action == "favchannels": vjlive.favchannels()

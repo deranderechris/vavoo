@@ -16,15 +16,8 @@ chanicons = ['13thstreet.png', '3sat.png', 'animalplanet.png', 'anixe.png', 'ard
 
 def resolve_link(link):
     try:
-        if not "vavoo" in link:
-            from vavoo.stalker import StalkerPortal
-            link, headers = StalkerPortal(get_cache_or_setting("stalkerurl"), get_cache_or_setting("mac")).get_tv_stream_url(link)
-            # Wenn 403 erkannt und None zurückkommt: sofort abbrechen
-            if not link: return None, None
-            status = int(requests.get(link, headers=headers, timeout=10, stream=True).status_code)
-            log(f"function resolve_link Staus :{status}")
-            if status < 400: return link, "&".join([f"{k}={v}" for k, v in headers.items()])
-        elif getSetting("streammode") == "1":
+        # edit by der andere: Stalker-Logik entfernt
+        if getSetting("streammode") == "1":
             _headers = {"user-agent": "MediaHubMX/2", "accept": "application/json", "content-type": "application/json; charset=utf-8", "content-length": "115", "accept-encoding": "gzip", "mediahubmx-signature": getAuthSignature()}
             _data = {"language": "de", "region": "AT", "url": link, "clientVersion": "3.0.2"}
             url = "https://vavoo.to/mediahubmx-resolve.json"
@@ -39,45 +32,7 @@ def resolve_link(link):
             if status < 400: return streamurl, "User-Agent=VAVOO/2.6"
     except: log(format_exc())
     return None, None
-
-def get_stalker_channels(genres=False):
-    if genres == False: cacheOk, genres = get_cache("stalker_groups")
-    from vavoo.stalker import StalkerPortal, get_genres, new_mac
-    if not genres: genres = get_genres()
-    cacheOk, chan = get_cache("sta_channels")
-    if not cacheOk:
-        url, mac = get_cache_or_setting("stalkerurl"), get_cache_or_setting("mac")
-        if not url or not mac:
-            dialog.notification('VAVOO.TO', 'Kein Stalkerportal gewählt, deaktiviere Stalker', xbmcgui.NOTIFICATION_ERROR, 2000)
-            setSetting("stalker", "false")
-            return {}
-        portal = StalkerPortal(url, mac)
-        check = portal.check()
-        if check == True: cacheOk, chan = get_cache("sta_channels")
-        elif check == "IP BLOCKED":
-            dialog.notification('VAVOO.TO', 'IP BLOCKED anderes Portal auswählen, deaktiviere Stalker', xbmcgui.NOTIFICATION_ERROR, 2000)
-            setSetting("stalker", "false")
-            return {}
-        else:
-            m = new_mac(True)
-            if m == False:
-                dialog.notification('VAVOO.TO', 'Keine funktionierende Mac gefunden, anderes Portal auswählen, deaktiviere Stalker', xbmcgui.NOTIFICATION_ERROR, 2000)
-                setSetting("stalker", "false")
-                return {}
-        cacheOk, chan = get_cache("sta_channels")
-        if not cacheOk: return {}
-    sta_channels = {}
-    for item in chan:
-        if item["tv_genre_id"] not in genres: continue
-        name = item["name"].upper()
-        # if not name.isascii(): continue
-        if any(ele in name for ele in ["***", "###", "---"]): continue
-        name = filterout(name)
-        if not name: continue
-        if name not in sta_channels: sta_channels[name] = []
-        if item["cmd"] not in sta_channels[name]:
-            sta_channels[name].append(item["cmd"])
-    return sta_channels
+    # edit by der andere: Stalker-Logik entfernt
 
 def get_epg_data():
     if int(addon.getSetting("epg_provider")) == 0:
@@ -209,7 +164,7 @@ def makem3u():
         a.writelines(m3u)
     ok = dialog.ok('VAVOO.TO', 'm3u erstellt in %s' % m3uPath)
 
-# edit kasi
+# edit by der andere
 def channels(items=None, type=None, group=None):
     try: lines = json.loads(getSetting("favs"))
     except: lines = []
