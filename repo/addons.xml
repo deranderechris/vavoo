@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addons>
-  <addon id="plugin.video.vavooto"
-         name="VAVOO.TO"
-         version="2025.11.10-2"
-         provider-name="edit by der andere">
+      <addon id="plugin.video.vavooto"
+        name="VAVOO.TO"
+        version="2025.11.10-2"
+        provider-name="edit by der andere">
     <extension point="xbmc.addon.repository"
                name="VAVOO.TO Repository"
                info="https://example.com/repo/addons.xml"

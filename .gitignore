@@ -1,0 +1,3 @@
+# Ignoriere alle ZIPs außer im repo-Ordner
+*.zip
+!repo/*.zip
