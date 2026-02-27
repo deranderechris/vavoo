@@ -47,17 +47,9 @@ def get_epg_data():
     return epg_data
 
 def getchannels(type=None, group=None):
-    if getSetting("stalker") == "true" and not type == "vavoo":
-        allchannels = get_stalker_channels() if type == None else get_stalker_channels([group])
-    else: allchannels = {}
-    if getSetting("vavoo") == "true" and not type == "stalker":
-        from vavoo.vavoo_tv import get_vav_channels
-        vav_channels = get_vav_channels() if type == None else get_vav_channels([group])
-    else: vav_channels = {}
-    for k, v in vav_channels.items():
-        if k not in allchannels: allchannels[k] = []
-        for n in v: allchannels[k].append(n)
-    return allchannels
+    from vavoo.vavoo_tv import get_vav_channels
+    vav_channels = get_vav_channels() if type == None else get_vav_channels([group])
+    return vav_channels
 
 def handle_wait(kanal):
     create = progress.create("Abbrechen zur manuellen Auswahl", "STARTE  : %s" % kanal)
