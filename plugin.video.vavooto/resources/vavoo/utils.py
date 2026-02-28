@@ -1,4 +1,80 @@
-# -*- coding: utf-8 -*-
+import xbmcgui, xbmcaddon, sys, xbmc, os, time, json, xbmcplugin, requests, re, sqlite3, base64
+import urllib3, resolveurl, base64, random, string, xbmcvfs
+from datetime import datetime
+from hashlib import md5, sha256, sha1
+from dateutil.parser import parse
+from traceback import format_exc
+from zlib import compress, decompress
+from xbmcgui import ListItem, Dialog, DialogProgress, Window
+from urllib.parse import urlencode, urlparse, parse_qsl, quote_plus, urlsplit, quote
+from concurrent.futures import ThreadPoolExecutor, as_completed
+try:
+    from infotagger.listitem import ListItemInfoTag
+    tagger = True
+except: tagger = False
+
+def translatePath(*args):
+    return xbmcvfs.translatePath(*args)
+
+def exists(*args):
+    return os.path.exists(translatePath(*args))
+
+addon = xbmcaddon.Addon("plugin.video.vavooto")
+addonInfo = addon.getAddonInfo
+addonID = "plugin.video.vavooto"
+addonprofile = translatePath(addonInfo('profile'))
+addonpath = translatePath(addonInfo('path'))
+cachepath = os.path.join(addonprofile, "cache")
+datapath = addonprofile
+if not exists(cachepath): os.makedirs(cachepath)
+home = Window(10000)
+session = requests.Session()
+progress = DialogProgress()
+dialog = Dialog()
+monitor = xbmc.Monitor()
+player = xbmc.Player
+getInfoLabel = xbmc.getInfoLabel
+getSetting = addon.getSetting
+setSetting = addon.setSetting
+openSettings = addon.openSettings
+execute = xbmc.executebuiltin
+getCondV = xbmc.getCondVisibility
+
+#unicode = str
+db = os.path.join(cachepath, 'tmp.db')
+con = sqlite3.connect(db)
+con.row_factory = lambda c, r: dict([(col[0], r[idx]) for idx, col in enumerate(c.description)])
+con.text_factory = lambda x: str(x, errors='ignore') # edit by der andere
+
+def clear(auto=False):
+    for a in os.listdir(cachepath):
+        file = os.path.join(cachepath, a)
+        key = a.replace(".json", "")
+        if auto:
+            m = open(file, "rb").read()
+            try: data = decompress(m)
+            except: data = m
+            r = json.loads(data)
+            sigValidUntil = r.get('sigValidUntil', 0)
+            if sigValidUntil != False and sigValidUntil < int(time.time()):
+                os.remove(file)
+                home.clearProperty(key)
+        else:
+            os.remove(file)
+            home.clearProperty(key)
+
+#clear(auto=True)
+
+def getAuthSignature():
+    i = 0
+    while i < 5:
+        i+=1
+        try:
+            _headers={"user-agent": "okhttp/4.11.0", "accept": "application/json", "content-type": "application/json; charset=utf-8", "content-length": "1106", "accept-encoding": "gzip"}
+            _data = {"token":"","reason":"boot","locale":"de","theme":"dark","metadata":{"device":{"type":"desktop","uniqueId":""},"os":{"name":"win32","version":"Windows 10 Education","abis":    ["x64"],"host":"DESKTOP-JN65HTI"},"app":{"platform":"electron"},"version":{"package":"app.lokke.main","binary":"1.0.19","js":"1.0.19"}},"appFocusTime":173,"playerActive":False,"playDuration":0,"devMode":True,"hasAddon":True,"castConnected":False,"package":"app.lokke.main","version":"1.0.19","process":"app","firstAppStart":1770751158625,"lastAppStart":1770751158625,"ipLocation":0,"adblockEnabled":True,"proxy":{"supported":["ss"],"engine":"cu","enabled":False,"autoServer":True,"id":0},"iap":{"supported":False}}
+            req = requests.post('https://www.lokke.app/api/app/ping', json=_data, headers=_headers).json()
+            return req.get("addonSig")
+        except: continue
 import xbmcgui, xbmcaddon, sys, xbmc, os, time, json, xbmcplugin, requests, re, sqlite3, base64
 import urllib3, resolveurl, base64, random, string, xbmcvfs
 from datetime import datetime
