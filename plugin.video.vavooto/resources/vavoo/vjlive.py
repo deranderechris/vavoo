@@ -17,20 +17,53 @@ chanicons = ['13thstreet.png', '3sat.png', 'animalplanet.png', 'anixe.png', 'ard
 def resolve_link(link):
     try:
         # edit by der andere: Stalker-Logik entfernt
+        # 1. VAVOO Resolver
         if getSetting("streammode") == "1":
             _headers = {"user-agent": "MediaHubMX/2", "accept": "application/json", "content-type": "application/json; charset=utf-8", "content-length": "115", "accept-encoding": "gzip", "mediahubmx-signature": getAuthSignature()}
             _data = {"language": "de", "region": "AT", "url": link, "clientVersion": "3.0.2"}
             url = "https://vavoo.to/mediahubmx-resolve.json"
             streamurl = requests.post(url, json=_data, headers=_headers).json()[0]["url"]
             status = int(requests.get(streamurl, timeout=10, stream=True).status_code)
-            log(f"function resolve_link Staus :{status}")
+            log(f"function resolve_link Status :{status}")
             if status < 400: return streamurl, None
-        else:
+        # 2. VAVOO-TS Resolver
+        elif "vavoo-iptv" in link:
             streamurl = "%s.ts?n=1&b=5&vavoo_auth=%s" % (link.replace("vavoo-iptv", "live2")[0:-12], gettsSignature())
             status = int(requests.get(streamurl, headers={"User-Agent": "VAVOO/2.6"}, timeout=10, stream=True).status_code)
-            log(f"function resolve_link Staus :{status}")
+            log(f"function resolve_link Status :{status}")
             if status < 400: return streamurl, "User-Agent=VAVOO/2.6"
-    except: log(format_exc())
+        # 3. m3u8/HLS Resolver
+        elif link.endswith(".m3u8"):
+            status = int(requests.get(link, timeout=10, stream=True).status_code)
+            log(f"function resolve_link Status :{status}")
+            if status < 400: return link, None
+        # 4. MP4 Resolver
+        elif link.endswith(".mp4"):
+            status = int(requests.get(link, timeout=10, stream=True).status_code)
+            log(f"function resolve_link Status :{status}")
+            if status < 400: return link, None
+        # 5. YouTube Resolver
+        elif "youtube.com" in link or "youtu.be" in link:
+            try:
+                import youtube_dl
+                ydl_opts = {"quiet": True, "format": "best"}
+                with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(link, download=False)
+                    url = info.get("url", None)
+                    if url:
+                        return url, None
+            except Exception as e:
+                log(f"YouTube Resolver Fehler: {e}")
+        # 6. Externer Resolver (resolveurl)
+        try:
+            import resolveurl
+            resolved = resolveurl.resolve(link)
+            if resolved:
+                return resolved, None
+        except Exception as e:
+            log(f"resolveurl Fehler: {e}")
+    except:
+        log(format_exc())
     return None, None
     # edit by der andere: Stalker-Logik entfernt
 
