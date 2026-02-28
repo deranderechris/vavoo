@@ -16,7 +16,7 @@ chanicons = ['13thstreet.png', '3sat.png', 'animalplanet.png', 'anixe.png', 'ard
 
 def resolve_link(link):
     try:
-        # edit by der andere: Stalker-Logik entfernt
+        # Stalker-Logik entfernt
         # 1. VAVOO Resolver
         if getSetting("streammode") == "1":
             _headers = {"user-agent": "MediaHubMX/2", "accept": "application/json", "content-type": "application/json; charset=utf-8", "content-length": "115", "accept-encoding": "gzip", "mediahubmx-signature": getAuthSignature()}
@@ -65,7 +65,7 @@ def resolve_link(link):
     except:
         log(format_exc())
     return None, None
-    # edit by der andere: Stalker-Logik entfernt
+    # Stalker-Logik entfernt
 
 def get_epg_data():
     if int(addon.getSetting("epg_provider")) == 0:

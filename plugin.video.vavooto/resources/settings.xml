@@ -15,7 +15,7 @@
     <!--<setting default="10" id="vav_cache" label="VAVOO TV Cache" type="number" option="int" visible="eq(-2,true))" />-->
     <setting label="VAVOO Kanalgruppen Auswahl" type="action" visible="eq(-2,true)" action="RunPlugin(plugin://plugin.video.vavooto/?action=choose)"/>
   </category>
-  <!-- edit by der andere: Stalker-Kategorie entfernt -->
+  <!-- Stalker-Kategorie entfernt -->
   <category label="VIDEO">
     <setting default="1" id="stream_select" label="Stream Auswahl" type="enum" values="Hoster|Automatisch" />
     <setting default="true" id="auto_try_next_stream" type="bool" visible="eq(-1,0)" label="Automatisch nächsten ähnlichen Stream versuchen"/>

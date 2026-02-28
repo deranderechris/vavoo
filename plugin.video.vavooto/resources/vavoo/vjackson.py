@@ -45,7 +45,7 @@ def group_tv(params):
         gruppen, hash = vavoo_groups()
         for group in gruppen:
             addDir2(group.encode().decode("ascii", errors="ignore"), "DefaultAddonPVRClient", "channels", type="vavoo", group=group)
-    # edit by der andere: Stalker-Logik entfernt
+    # Stalker-Logik entfernt
     else:
         if getSetting("vavoo") == "true":
             group_tv({"type":"vavoo"})

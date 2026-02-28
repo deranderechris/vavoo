@@ -25,7 +25,7 @@ if __name__ == "__main__":
         else: vjlive.livePlay(tv, params.get('type'), params.get('group'))
     elif action == None: vjackson.menu(params)
     elif action == "choose": vavoo_tv.choose()
-    # edit by der andere: Stalker-Logik entfernt
+    # Stalker-Logik entfernt
     elif action == "clear": clear()
     elif action == "delete_search": delete_search(params)
     elif action == "delallTvFavorit":
